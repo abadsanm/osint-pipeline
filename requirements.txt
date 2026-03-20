@@ -29,5 +29,9 @@ pandas-ta>=0.3.14b
 lightgbm>=4.1.0
 scikit-learn>=1.3.0
 
+# Product Ideation Engine
+pyabsa>=2.3.0
+sentence-transformers>=2.2.0
+
 # Logging & utilities
 python-dotenv>=1.0.0
