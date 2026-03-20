@@ -21,3 +21,7 @@ Thumbs.db
 
 # Docker
 docker-compose.override.yml
+
+# ML models (large binaries)
+models/*.bin
+models/*.ftz
