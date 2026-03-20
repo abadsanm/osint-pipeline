@@ -1,0 +1,20 @@
+# OSINT Pipeline — Python Dependencies
+# pip install -r requirements.txt
+
+# Kafka
+confluent-kafka>=2.3.0
+
+# Async HTTP
+aiohttp>=3.9.0
+
+# Data validation & serialization
+pydantic>=2.5.0
+
+# Language detection (for normalization layer)
+fasttext-wheel>=0.9.2
+
+# NLP preprocessing (used by stream processor, not the connector)
+# spacy>=3.7.0
+
+# Logging & utilities
+python-dotenv>=1.0.0

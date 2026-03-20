@@ -1,0 +1,115 @@
+version: "3.8"
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    hostname: zookeeper
+    container_name: osint-zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    healthcheck:
+      test: ["CMD", "echo", "ruok", "|", "nc", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    hostname: kafka
+    container_name: osint-kafka
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_RETENTION_BYTES: 1073741824
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.6.1
+    hostname: schema-registry
+    container_name: osint-schema-registry
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:29092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: osint-kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: osint-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: http://schema-registry:8081
+
+  init-topics:
+    image: confluentinc/cp-kafka:7.6.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command: |
+      "
+      echo 'Creating OSINT Kafka topics...'
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic tech.hn.stories --partitions 3 --replication-factor 1 \
+        --config retention.ms=604800000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic tech.hn.comments --partitions 6 --replication-factor 1 \
+        --config retention.ms=604800000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic tech.github.events --partitions 3 --replication-factor 1 \
+        --config retention.ms=604800000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic consumer.reviews.trustpilot --partitions 3 --replication-factor 1 \
+        --config retention.ms=604800000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic consumer.reviews.amazon --partitions 3 --replication-factor 1 \
+        --config retention.ms=604800000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic osint.normalized --partitions 6 --replication-factor 1 \
+        --config retention.ms=2592000000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic osint.deadletter --partitions 1 --replication-factor 1 \
+        --config retention.ms=-1
+
+      echo 'All topics created.'
+      kafka-topics --bootstrap-server kafka:29092 --list
+      "
