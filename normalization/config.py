@@ -20,6 +20,7 @@ class NormalizationConfig:
         "finance.congress.trades",
         "finance.reddit.posts",
         "finance.reddit.comments",
+        "trends.google.interest",
     ]
 
     OUTPUT_TOPIC = "osint.normalized"
