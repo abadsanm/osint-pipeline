@@ -27,9 +27,9 @@ from html import unescape
 from typing import Optional
 
 import aiohttp
-from confluent_kafka import Producer
 from confluent_kafka.admin import AdminClient
 
+from connectors.kafka_publisher import KafkaPublisher
 from schemas.document import (
     ContentType,
     OsintDocument,
@@ -90,57 +90,6 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 log = logging.getLogger("hn-connector")
-
-
-# ---------------------------------------------------------------------------
-# Kafka Producer
-# ---------------------------------------------------------------------------
-
-class KafkaPublisher:
-    """Thin wrapper around confluent_kafka.Producer with delivery callbacks."""
-
-    def __init__(self, bootstrap_servers: str):
-        self._producer = Producer({
-            "bootstrap.servers": bootstrap_servers,
-            "client.id": "hn-connector",
-            "acks": "all",
-            "enable.idempotence": True,
-            "max.in.flight.requests.per.connection": 5,
-            "compression.type": "lz4",
-            "linger.ms": 50,
-            "batch.size": 65536,
-        })
-        self._delivery_count = 0
-        self._error_count = 0
-
-    def _on_delivery(self, err, msg):
-        if err:
-            log.error("Kafka delivery failed: %s", err)
-            self._error_count += 1
-        else:
-            self._delivery_count += 1
-
-    def publish(self, topic: str, key: str, value: str):
-        self._producer.produce(
-            topic=topic,
-            key=key.encode("utf-8"),
-            value=value.encode("utf-8"),
-            callback=self._on_delivery,
-        )
-        # Trigger delivery callbacks without blocking
-        self._producer.poll(0)
-
-    def flush(self, timeout: float = 10.0):
-        remaining = self._producer.flush(timeout)
-        if remaining > 0:
-            log.warning("Kafka flush: %d messages still in queue", remaining)
-
-    @property
-    def stats(self) -> dict:
-        return {
-            "delivered": self._delivery_count,
-            "errors": self._error_count,
-        }
 
 
 # ---------------------------------------------------------------------------
@@ -469,7 +418,7 @@ async def main():
     # Wait for Kafka to be available
     await wait_for_kafka(HNConfig.KAFKA_BOOTSTRAP)
 
-    publisher = KafkaPublisher(HNConfig.KAFKA_BOOTSTRAP)
+    publisher = KafkaPublisher(HNConfig.KAFKA_BOOTSTRAP, client_id="hn-connector")
 
     # Graceful shutdown
     shutdown_event = asyncio.Event()
