@@ -130,6 +130,22 @@ services:
         --topic trends.google.interest --partitions 3 --replication-factor 1 \
         --config retention.ms=604800000
 
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic osint.correlated --partitions 6 --replication-factor 1 \
+        --config retention.ms=2592000000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic osint.correlated.stock_alpha --partitions 3 --replication-factor 1 \
+        --config retention.ms=2592000000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic osint.correlated.product_ideation --partitions 3 --replication-factor 1 \
+        --config retention.ms=2592000000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic osint.correlated.anomalies --partitions 1 --replication-factor 1 \
+        --config retention.ms=2592000000
+
       echo 'All topics created.'
       kafka-topics --bootstrap-server kafka:29092 --list
       "
