@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import * as d3 from "d3";
 import { MoreHorizontal } from "lucide-react";
 import AnalysisModal from "./AnalysisModal";
@@ -39,6 +39,12 @@ export default function HeatSphere({ data }: HeatSphereProps) {
     sector: Sector;
   } | null>(null);
   const [modal, setModal] = useState<Sector | null>(null);
+
+  // Only re-render D3 when the entity list actually changes (not every poll)
+  const dataKey = useMemo(
+    () => data.map((d) => d.id).sort().join(","),
+    [data]
+  );
 
   useEffect(() => {
     if (!svgRef.current || !containerRef.current || !data.length) return;
@@ -147,7 +153,8 @@ export default function HeatSphere({ data }: HeatSphereProps) {
     return () => {
       simulation.stop();
     };
-  }, [data]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataKey]);
 
   return (
     <div ref={containerRef} className="card relative w-full h-full overflow-hidden">

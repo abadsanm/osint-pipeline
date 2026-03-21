@@ -36,20 +36,62 @@ export default function AnalysisModal({
   useEffect(() => {
     const fetchAnalysis = async () => {
       setLoading(true);
+
+      // If we're missing context (volume=0, no sources), try to enrich from search API
+      let enriched = { ...entity };
+      if (!entity.volume || entity.volume === 0 || !entity.sources || Object.keys(entity.sources).length === 0) {
+        try {
+          const searchRes = await fetch(`${API_BASE}/search?q=${encodeURIComponent(entity.id)}`);
+          if (searchRes.ok) {
+            const results = await searchRes.json();
+            if (results.length > 0) {
+              const match = results[0];
+              enriched = {
+                ...enriched,
+                volume: match.volume || enriched.volume,
+                sentiment: match.sentiment || enriched.sentiment,
+                label: match.label || enriched.label,
+              };
+            }
+          }
+          // Also try to get full sector data
+          const sectorRes = await fetch(`${API_BASE}/sectors?limit=100`);
+          if (sectorRes.ok) {
+            const sectors = await sectorRes.json();
+            const found = sectors.find((s: any) =>
+              s.id.toLowerCase() === entity.id.toLowerCase() ||
+              s.label.toLowerCase().includes(entity.id.toLowerCase())
+            );
+            if (found) {
+              enriched = {
+                ...enriched,
+                volume: found.volume || enriched.volume,
+                sentiment: found.sentiment || enriched.sentiment,
+                sources: found.sources || enriched.sources,
+                keywords: found.keywords || enriched.keywords,
+                sampleDocs: found.sampleDocs || enriched.sampleDocs,
+              };
+            }
+          }
+        } catch {
+          // Continue with what we have
+        }
+      }
+
       try {
         const res = await fetch(`${API_BASE}/analyze`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            entity_id: entity.id,
-            label: entity.label,
-            sentiment: entity.sentiment,
-            volume: entity.volume,
-            sources: entity.sources || {},
-            keywords: entity.keywords || [],
-            sampleDocs: entity.sampleDocs || [],
-            signal_type: entity.signal_type || "",
-            confidence: entity.confidence || 0,
+            entity_id: enriched.id,
+            label: enriched.label,
+            sentiment: enriched.sentiment,
+            volume: enriched.volume,
+            sources: enriched.sources || {},
+            keywords: enriched.keywords || [],
+            sampleDocs: enriched.sampleDocs || [],
+            signal_type: enriched.signal_type || "",
+            confidence: enriched.confidence || 0,
             context_type: contextType,
           }),
         });
@@ -68,7 +110,8 @@ export default function AnalysisModal({
     };
 
     fetchAnalysis();
-  }, [entity, contextType]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entity.id, contextType]);
 
   const sentimentColor =
     entity.sentiment > 0.6
