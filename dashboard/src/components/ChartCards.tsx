@@ -245,7 +245,7 @@ export default function ChartCards({
   macroTimeline,
 }: ChartCardsProps) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 h-full min-h-[140px]">
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 h-full">
       <MacroSentimentCard
         title="Macro Sentiment vs. S&P 500"
         data={macroTimeline}

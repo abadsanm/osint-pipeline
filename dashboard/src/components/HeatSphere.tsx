@@ -144,7 +144,7 @@ export default function HeatSphere({ data }: HeatSphereProps) {
   }, [data]);
 
   return (
-    <div ref={containerRef} className="card relative w-full h-full min-h-0 overflow-hidden">
+    <div ref={containerRef} className="card relative w-full h-full overflow-hidden">
       <div className="flex items-center justify-between mb-1">
         <h2 className="text-sm font-semibold text-text-secondary">
           Sentiment Heat-Sphere
