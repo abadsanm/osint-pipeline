@@ -434,6 +434,65 @@ def get_topics():
         return dict(topic_counts)
 
 
+@app.get("/api/search")
+def search_entities(
+    q: str = Query("", min_length=1, max_length=200, description="Search query"),
+):
+    """Search entity_mentions by id, label, or keywords. Returns top 10 matches."""
+    query = q.lower().strip()
+    if not query:
+        return []
+
+    results = []
+    with _lock:
+        for eid, em in entity_mentions.items():
+            # Score based on match quality
+            score = 0
+            eid_lower = eid.lower()
+            label_lower = (em.get("label") or "").lower()
+            keywords_lower = [k.lower() for k in em.get("keywords", [])]
+
+            if query == eid_lower or query == label_lower:
+                score = 100  # Exact match
+            elif query in eid_lower:
+                score = 80
+            elif query in label_lower:
+                score = 60
+            elif any(query in kw for kw in keywords_lower):
+                score = 40
+            else:
+                # Check if any query word matches
+                query_words = query.split()
+                for word in query_words:
+                    if word in eid_lower or word in label_lower:
+                        score = max(score, 30)
+                    elif any(word in kw for kw in keywords_lower):
+                        score = max(score, 20)
+
+            if score > 0:
+                sentiment = 0.5
+                if em.get("sentiment_count", 0) > 0:
+                    sentiment = em["sentiment_sum"] / em["sentiment_count"]
+
+                results.append({
+                    "id": em["id"],
+                    "label": em.get("label", eid),
+                    "volume": em.get("volume", 0),
+                    "sentiment": round(sentiment, 3),
+                    "_score": score,
+                    "_volume": em.get("volume", 0),
+                })
+
+    # Sort by match quality, then by volume
+    results.sort(key=lambda r: (-r["_score"], -r["_volume"]))
+    # Remove internal scoring fields and limit to 10
+    for r in results:
+        del r["_score"]
+        del r["_volume"]
+
+    return results[:10]
+
+
 # ---------------------------------------------------------------------------
 # Startup
 # ---------------------------------------------------------------------------
