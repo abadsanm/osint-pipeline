@@ -12,11 +12,16 @@ Usage:
 import asyncio
 import json
 import logging
+import os
 import threading
 import time
+import uuid
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Optional
+
+# Unique instance ID — ensures each API restart re-reads Kafka from earliest
+_INSTANCE_ID = uuid.uuid4().hex[:8]
 
 from confluent_kafka import Consumer, KafkaError
 from fastapi import FastAPI, Query
@@ -85,8 +90,8 @@ def _consume_raw_topics():
 
     consumer = Consumer({
         "bootstrap.servers": "localhost:9092",
-        "group.id": "sentinel-api-raw",
-        "auto.offset.reset": "latest",
+        "group.id": f"sentinel-api-raw-{_INSTANCE_ID}",
+        "auto.offset.reset": "earliest",
         "enable.auto.commit": True,
     })
     consumer.subscribe(raw_topics)
@@ -202,8 +207,8 @@ def _consume_signals():
 
     consumer = Consumer({
         "bootstrap.servers": "localhost:9092",
-        "group.id": "sentinel-api-signals",
-        "auto.offset.reset": "latest",
+        "group.id": f"sentinel-api-signals-{_INSTANCE_ID}",
+        "auto.offset.reset": "earliest",
         "enable.auto.commit": True,
     })
     consumer.subscribe(signal_topics)
