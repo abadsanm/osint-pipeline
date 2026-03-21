@@ -346,7 +346,7 @@ function MACDCard({
 // ---------------------------------------------------------------------------
 
 function BollingerCard({ bb }: { bb: AlphaData["technicals"]["bb"] }) {
-  if (!bb) {
+  if (!bb || bb.pctb === null || bb.pctb === undefined) {
     return (
       <div className="bg-surface border border-border rounded-card p-card-padding">
         <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
@@ -416,15 +416,15 @@ function BollingerCard({ bb }: { bb: AlphaData["technicals"]["bb"] }) {
       <div className="grid grid-cols-3 gap-2 text-center">
         <div>
           <p className="text-[10px] text-text-muted">Upper</p>
-          <p className="font-mono text-xs text-text-primary">${bb.upper.toFixed(2)}</p>
+          <p className="font-mono text-xs text-text-primary">${bb.upper?.toFixed(2) ?? "--"}</p>
         </div>
         <div>
           <p className="text-[10px] text-text-muted">Middle</p>
-          <p className="font-mono text-xs text-text-primary">${bb.middle.toFixed(2)}</p>
+          <p className="font-mono text-xs text-text-primary">${bb.middle?.toFixed(2) ?? "--"}</p>
         </div>
         <div>
           <p className="text-[10px] text-text-muted">Lower</p>
-          <p className="font-mono text-xs text-text-primary">${bb.lower.toFixed(2)}</p>
+          <p className="font-mono text-xs text-text-primary">${bb.lower?.toFixed(2) ?? "--"}</p>
         </div>
       </div>
     </div>

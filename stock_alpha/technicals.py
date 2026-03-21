@@ -101,12 +101,11 @@ def compute_technicals(df: pd.DataFrame) -> pd.DataFrame:
         std=StockAlphaConfig.BB_STD,
     )
     if bb is not None:
-        bb_lower = f"BBL_{StockAlphaConfig.BB_PERIOD}_{StockAlphaConfig.BB_STD}"
-        bb_mid = f"BBM_{StockAlphaConfig.BB_PERIOD}_{StockAlphaConfig.BB_STD}"
-        bb_upper = f"BBU_{StockAlphaConfig.BB_PERIOD}_{StockAlphaConfig.BB_STD}"
-        df["bb_lower"] = bb.get(bb_lower)
-        df["bb_mid"] = bb.get(bb_mid)
-        df["bb_upper"] = bb.get(bb_upper)
+        # pandas-ta bbands column names vary by version — match by prefix
+        bb_cols = {c[:3]: c for c in bb.columns}  # e.g., {"BBL": "BBL_20_2.0_2.0", ...}
+        df["bb_lower"] = bb.get(bb_cols.get("BBL"))
+        df["bb_mid"] = bb.get(bb_cols.get("BBM"))
+        df["bb_upper"] = bb.get(bb_cols.get("BBU"))
         # BB %B: where price is within the bands (0=lower, 1=upper)
         if "bb_upper" in df.columns and "bb_lower" in df.columns:
             bb_width = df["bb_upper"] - df["bb_lower"]
