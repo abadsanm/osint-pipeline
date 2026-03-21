@@ -71,6 +71,7 @@ Source Connectors → Raw Kafka Topics → Normalization (fastText/spaCy/SimHash
   - `document.py` — `OsintDocument`, `EntityMention`, `QualitySignals` — universal document format
   - `signal.py` — `CorrelatedSignal`, `SourceContribution` — cross-correlation output
   - `product_gap.py` — `ProductGap`, `ProductIdeationReport` — product ideation output
+  - `market_data.py` — `OrderBookSnapshot`, `AggregatedTrade`, `MarketBar` — market microstructure data
 
 - **`connectors/`** — Source connectors (async, aiohttp + confluent-kafka Producer)
   - `kafka_publisher.py` — Shared `KafkaPublisher` wrapper used by all connectors
@@ -85,6 +86,8 @@ Source Connectors → Raw Kafka Topics → Normalization (fastText/spaCy/SimHash
   - `fred.py` — FRED API: 13 macro series (GDP, CPI, unemployment, fed funds, treasuries, etc.) + release calendar
   - `openinsider.py` — OpenInsider scraper: insider buying/selling, cluster buys (BeautifulSoup)
   - `producthunt.py` — ProductHunt launches + comments via GraphQL API or web scrape fallback
+  - `binance.py` — Binance WebSocket: real-time order book depth + aggregated trades (crypto)
+  - `alpaca_market.py` — Alpaca Data API: 1-minute OHLCV bars with VWAP for equities
 
 - **`normalization/`** — NLP pipeline (sync Kafka Consumer, CPU-bound)
   - `processors/language.py` — fastText lid.176 language detection
@@ -104,8 +107,10 @@ Source Connectors → Raw Kafka Topics → Normalization (fastText/spaCy/SimHash
   - `sentiment.py` — FinBERT (ProsusAI/finbert) financial sentiment with batch inference
   - `svc.py` — Sentiment Volume Convergence metric (sentiment_shift x volume_change)
   - `technicals.py` — yfinance OHLCV + pandas-ta indicators (RSI, MACD, BB, SMA/EMA, ATR, OBV)
-  - `scorer.py` — Rule-based weighted scorer: sentiment 30% + SVC 20% + technicals 30% + correlation 20%
-  - `engine.py` — Orchestrates FinBERT → SVC → technicals → scoring per ticker
+  - `microstructure.py` — Anchored VWAP, volume profile (POC/value area), fair value gap detection
+  - `order_flow.py` — Order flow delta (buy/sell imbalance), liquidity sweep detection
+  - `scorer.py` — Rule-based weighted scorer: sentiment 25% + SVC 15% + technicals 20% + microstructure 15% + order_flow 15% + correlation 10%
+  - `engine.py` — Orchestrates FinBERT → SVC → technicals → microstructure → order flow → scoring per ticker
 
 - **`product_ideation/`** — Product Ideation value engine
   - `absa.py` — PyABSA aspect extraction with spaCy noun-chunk fallback
@@ -145,6 +150,8 @@ Source Connectors → Raw Kafka Topics → Normalization (fastText/spaCy/SimHash
 | `finance.macro.fred` | 3 | FRED macro economic data series |
 | `finance.insider.trades` | 3 | OpenInsider insider buying/selling/cluster buys |
 | `tech.producthunt.launches` / `tech.producthunt.comments` | 3/3 | ProductHunt product launches and comments |
+| `market.binance.depth` / `market.binance.trades` | 3/3 | Binance order book snapshots and aggregated trades |
+| `market.alpaca.bars` | 3 | Alpaca 1-minute OHLCV bars with VWAP |
 
 ## Conventions
 
@@ -203,6 +210,10 @@ Source Connectors → Raw Kafka Topics → Normalization (fastText/spaCy/SimHash
 | `FRED_SERIES` | fred | Override default 13 macro series (comma-separated) |
 | `PRODUCTHUNT_TOKEN` | producthunt | Enables GraphQL API mode (otherwise scrapes) |
 | `OPENINSIDER_POLL_INTERVAL` | openinsider | Override poll interval (default: 900s) |
+| `BINANCE_SYMBOLS` | binance | Override crypto symbols (default: BTCUSDT,ETHUSDT,SOLUSDT) |
+| `ALPACA_API_KEY` | alpaca_market | Alpaca API key (required for Alpaca connector) |
+| `ALPACA_API_SECRET` | alpaca_market | Alpaca API secret (required for Alpaca connector) |
+| `ALPACA_SYMBOLS` | alpaca_market | Override equity symbols (default: SPY,QQQ,AAPL,MSFT,NVDA) |
 
 ## Known Issues
 

@@ -33,5 +33,8 @@ scikit-learn>=1.3.0
 pyabsa>=2.3.0
 sentence-transformers>=2.2.0
 
+# WebSocket (Binance connector)
+websockets>=12.0
+
 # Logging & utilities
 python-dotenv>=1.0.0

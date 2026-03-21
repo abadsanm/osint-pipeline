@@ -51,6 +51,10 @@ class AlphaSignal:
     bb_pctb: Optional[float] = None
     price: Optional[float] = None
 
+    # Microstructure & order flow
+    microstructure_score: Optional[float] = None
+    order_flow_score: Optional[float] = None
+
     def to_dict(self) -> dict:
         return {
             "ticker": self.ticker,
@@ -61,6 +65,8 @@ class AlphaSignal:
             "svc_value": round(self.svc_value, 6),
             "technical_score": round(self.technical_score, 4),
             "correlation_confidence": round(self.correlation_confidence, 4),
+            "microstructure_score": round(self.microstructure_score, 4) if self.microstructure_score is not None else None,
+            "order_flow_score": round(self.order_flow_score, 4) if self.order_flow_score is not None else None,
             "contributing_signals": self.contributing_signals,
             "top_sources": self.top_sources,
             "timestamp": self.timestamp.isoformat(),
@@ -72,19 +78,30 @@ class AlphaSignal:
 
 
 class RuleBasedScorer:
-    """Combines sentiment, SVC, and technicals into a weighted alpha signal.
+    """Combines sentiment, SVC, technicals, microstructure, and order flow
+    into a weighted alpha signal.
 
-    Weights:
-      - Sentiment (FinBERT): 30%
-      - SVC metric: 20%
-      - Technical indicators: 30%
-      - Cross-correlation confidence: 20%
+    Base weights (when all components present):
+      - Sentiment (FinBERT): 25%
+      - SVC metric: 15%
+      - Technical indicators: 20%
+      - Microstructure: 15%
+      - Order flow: 15%
+      - Cross-correlation confidence: 10%
+
+    When microstructure and/or order_flow are None (no market data for that
+    ticker), their weight is redistributed proportionally to the other factors.
     """
 
-    WEIGHT_SENTIMENT = 0.30
-    WEIGHT_SVC = 0.20
-    WEIGHT_TECHNICAL = 0.30
-    WEIGHT_CORRELATION = 0.20
+    # Base weights — must sum to 1.0
+    _BASE_WEIGHTS = {
+        "sentiment": 0.25,
+        "svc": 0.15,
+        "technical": 0.20,
+        "microstructure": 0.15,
+        "order_flow": 0.15,
+        "correlation": 0.10,
+    }
 
     def score(
         self,
@@ -95,6 +112,8 @@ class RuleBasedScorer:
         correlation_confidence: float,
         contributing_signals: int = 0,
         top_sources: Optional[list[str]] = None,
+        microstructure_signals: Optional[dict] = None,
+        order_flow_signals: Optional[dict] = None,
     ) -> AlphaSignal:
         """Compute a unified alpha signal from all components."""
         # Normalize SVC to -1..+1 range (tanh-like clamping)
@@ -104,13 +123,29 @@ class RuleBasedScorer:
         # Compute technical score
         tech_score, rsi, macd_hist, bb_pctb, price = self._score_technicals(technicals)
 
+        # Compute microstructure score (-1..+1)
+        micro_score = self._score_microstructure(microstructure_signals)
+
+        # Compute order flow score (-1..+1)
+        flow_score = self._score_order_flow(order_flow_signals)
+
+        # Build active weights — exclude components with no data
+        active = {
+            "sentiment": sentiment_score,
+            "svc": svc_normalized,
+            "technical": tech_score,
+            "correlation": correlation_confidence * 2 - 1,  # Map 0-1 to -1..+1
+        }
+        if micro_score is not None:
+            active["microstructure"] = micro_score
+        if flow_score is not None:
+            active["order_flow"] = flow_score
+
+        # Redistribute missing weights proportionally
+        weights = self._redistribute_weights(set(active.keys()))
+
         # Weighted combination
-        raw_score = (
-            self.WEIGHT_SENTIMENT * sentiment_score
-            + self.WEIGHT_SVC * svc_normalized
-            + self.WEIGHT_TECHNICAL * tech_score
-            + self.WEIGHT_CORRELATION * (correlation_confidence * 2 - 1)  # Map 0-1 to -1..+1
-        )
+        raw_score = sum(weights[k] * active[k] for k in active)
 
         # Clamp to -1..+1
         signal_score = max(-1.0, min(1.0, raw_score))
@@ -129,6 +164,8 @@ class RuleBasedScorer:
             svc is not None,
             technicals is not None and not technicals.empty,
             correlation_confidence > 0,
+            micro_score is not None,
+            flow_score is not None,
         ])
         confidence = min(1.0, (correlation_confidence + abs(signal_score)) / 2)
         if components_present < 2:
@@ -150,7 +187,83 @@ class RuleBasedScorer:
             macd_hist=macd_hist,
             bb_pctb=bb_pctb,
             price=price,
+            microstructure_score=micro_score,
+            order_flow_score=flow_score,
         )
+
+    @classmethod
+    def _redistribute_weights(cls, active_keys: set[str]) -> dict[str, float]:
+        """Return weights for active components, redistributing missing weight."""
+        active_total = sum(
+            cls._BASE_WEIGHTS[k] for k in active_keys if k in cls._BASE_WEIGHTS
+        )
+        if active_total <= 0:
+            return {k: 0.0 for k in active_keys}
+        scale = 1.0 / active_total
+        return {k: cls._BASE_WEIGHTS[k] * scale for k in active_keys}
+
+    @staticmethod
+    def _score_microstructure(signals: Optional[dict]) -> Optional[float]:
+        """Derive a -1..+1 score from microstructure indicators.
+
+        Expects keys: anchored_vwap_position (-1..+1 where price is vs VWAP),
+        volume_profile (dict with poc_price), fvg_bias (-1..+1).
+        """
+        if signals is None:
+            return None
+
+        components = []
+
+        # VWAP position: positive = price above VWAP (bullish)
+        vwap_pos = signals.get("anchored_vwap_position")
+        if vwap_pos is not None:
+            components.append(max(-1.0, min(1.0, vwap_pos)))
+
+        # FVG bias: net direction of recent fair value gaps
+        fvg_bias = signals.get("fvg_bias")
+        if fvg_bias is not None:
+            components.append(max(-1.0, min(1.0, fvg_bias)))
+
+        # Volume profile: price relative to POC
+        vp_position = signals.get("volume_profile_position")
+        if vp_position is not None:
+            components.append(max(-1.0, min(1.0, vp_position * 0.5)))
+
+        if not components:
+            return None
+        return sum(components) / len(components)
+
+    @staticmethod
+    def _score_order_flow(signals: Optional[dict]) -> Optional[float]:
+        """Derive a -1..+1 score from order flow indicators.
+
+        Expects keys: imbalance_ratio, cumulative_delta_normalized (-1..+1),
+        sweep_bias (-1..+1).
+        """
+        if signals is None:
+            return None
+
+        components = []
+
+        # Delta direction: positive cumulative delta = buying pressure
+        delta_norm = signals.get("cumulative_delta_normalized")
+        if delta_norm is not None:
+            components.append(max(-1.0, min(1.0, delta_norm)))
+
+        # Imbalance ratio scaled by delta direction
+        imbalance = signals.get("imbalance_ratio", 0.0)
+        delta_sign = 1.0 if signals.get("cumulative_delta", 0) >= 0 else -1.0
+        if imbalance > 0.1:
+            components.append(delta_sign * min(1.0, imbalance * 2))
+
+        # Sweep bias: net direction of liquidity sweeps
+        sweep_bias = signals.get("sweep_bias")
+        if sweep_bias is not None:
+            components.append(max(-1.0, min(1.0, sweep_bias)))
+
+        if not components:
+            return None
+        return sum(components) / len(components)
 
     @staticmethod
     def _score_technicals(

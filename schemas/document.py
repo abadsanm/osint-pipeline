@@ -30,6 +30,8 @@ class SourcePlatform(str, Enum):
     NEWS = "news"
     FRED = "fred"
     PRODUCTHUNT = "producthunt"
+    BINANCE = "binance"
+    ALPACA = "alpaca"
 
 
 class ContentType(str, Enum):
