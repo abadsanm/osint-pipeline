@@ -39,7 +39,7 @@ export default function SignalFeed({ signals }: SignalFeedProps) {
 
       <div className="flex-1 overflow-y-auto min-h-0">
         {signals.map((signal, i) => (
-          <div key={signal.id}>
+          <div key={`${signal.id}-${i}`}>
             <div className="flex items-start gap-2.5 py-3 px-1 hover:bg-surface-alt/50 transition-colors duration-150 cursor-pointer rounded">
               <span
                 className={`w-2 h-2 rounded-full mt-1 flex-shrink-0 ${dotColor[signal.type]}`}

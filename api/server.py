@@ -193,7 +193,11 @@ def _consume_signals():
                         "timestamp": data.get("created_at", datetime.now(timezone.utc).isoformat()),
                         "confidence": data.get("confidence_score", 0),
                     }
-                    signals.append(signal_entry)
+                    # Deduplicate by entity+headline
+                    dedup_key = f"{signal_entry['ticker']}:{signal_entry['headline']}"
+                    existing_keys = {f"{s['ticker']}:{s['headline']}" for s in signals}
+                    if dedup_key not in existing_keys:
+                        signals.append(signal_entry)
 
         except Exception as e:
             log.warning("Failed to process signal message: %s", e)
