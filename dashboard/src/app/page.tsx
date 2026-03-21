@@ -46,9 +46,6 @@ export default function GlobalPulsePage() {
           </button>
         </div>
 
-        {/* Timeframe selector */}
-        <TimeframeSelector active={timeframe} onSelect={setTimeframe} />
-
         {/* Main: Heat Sphere + Signal Feed */}
         <ResizableCard defaultHeight={480} minHeight={200} maxHeight={800} resetKey={resetKey}>
           <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-3 h-full">
@@ -72,6 +69,9 @@ export default function GlobalPulsePage() {
             <ChartCards.Economic data={sectorSentiment.economicSentiments as any} />
           </ResizableCard>
         </div>
+
+        {/* Timeframe selector */}
+        <TimeframeSelector active={timeframe} onSelect={setTimeframe} />
       </div>
     </div>
   );
