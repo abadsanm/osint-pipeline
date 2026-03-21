@@ -21,9 +21,17 @@ export default function ChatPanel({ open, onClose }: ChatPanelProps) {
       id: "welcome",
       role: "assistant",
       text: "Sentinel AI assistant ready. Ask about any ticker, signal, or market trend.",
-      timestamp: new Date().toLocaleTimeString(),
+      timestamp: "",
     },
   ]);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    setMessages((prev) =>
+      prev.map((m) => m.id === "welcome" ? { ...m, timestamp: new Date().toLocaleTimeString() } : m)
+    );
+  }, []);
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -95,7 +103,7 @@ export default function ChatPanel({ open, onClose }: ChatPanelProps) {
             >
               {msg.text}
             </div>
-            <span className="text-[10px] text-text-muted mt-0.5 px-1">{msg.timestamp}</span>
+            <span className="text-[10px] text-text-muted mt-0.5 px-1" suppressHydrationWarning>{msg.timestamp}</span>
           </div>
         ))}
       </div>
