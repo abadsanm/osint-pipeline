@@ -1,9 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import * as d3 from "d3";
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal, X, ExternalLink } from "lucide-react";
+
+interface SampleDoc {
+  title: string;
+  source: string;
+  url: string | null;
+  created_at: string;
+  score: number;
+}
 
 interface Sector {
   id: string;
@@ -13,6 +20,9 @@ interface Sector {
   volume: number;
   priceChange24h: number;
   keywords: string[];
+  sources?: Record<string, number>;
+  sampleDocs?: SampleDoc[];
+  uniqueSources?: number;
 }
 
 interface HeatSphereProps {
@@ -22,12 +32,12 @@ interface HeatSphereProps {
 export default function HeatSphere({ data }: HeatSphereProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const router = useRouter();
   const [tooltip, setTooltip] = useState<{
     x: number;
     y: number;
     sector: Sector;
   } | null>(null);
+  const [modal, setModal] = useState<Sector | null>(null);
 
   useEffect(() => {
     if (!svgRef.current || !containerRef.current || !data.length) return;
@@ -40,17 +50,17 @@ export default function HeatSphere({ data }: HeatSphereProps) {
     svg.selectAll("*").remove();
     svg.attr("width", width).attr("height", height);
 
-    // Color scale: bearish (0) → neutral (0.5) → bullish (1)
+    // Color scale: bearish (0) -> neutral (0.5) -> bullish (1)
     const colorScale = d3
       .scaleLinear<string>()
-      .domain([0, 0.35, 0.5, 0.65, 1])
+      .domain([0, 0.3, 0.5, 0.7, 1])
       .range(["#FF4B2B", "#E88A5A", "#8B949E", "#5CB88A", "#00FFC2"]);
 
     const maxVol = d3.max(data, (d) => d.volume) || 1;
     const radiusScale = d3
       .scaleSqrt()
       .domain([0, maxVol])
-      .range([12, Math.min(width, height) * 0.11]);
+      .range([14, Math.min(width, height) * 0.1]);
 
     const nodes = data.map((d) => ({
       ...d,
@@ -63,10 +73,7 @@ export default function HeatSphere({ data }: HeatSphereProps) {
       .forceSimulation(nodes as any)
       .force("x", d3.forceX(width / 2).strength(0.04))
       .force("y", d3.forceY(height / 2).strength(0.04))
-      .force(
-        "collision",
-        d3.forceCollide((d: any) => d.r + 2).strength(0.9)
-      )
+      .force("collision", d3.forceCollide((d: any) => d.r + 2).strength(0.9))
       .force("charge", d3.forceManyBody().strength(-3))
       .alphaDecay(0.015);
 
@@ -78,7 +85,6 @@ export default function HeatSphere({ data }: HeatSphereProps) {
       .join("g")
       .style("cursor", "pointer");
 
-    // Bubble circles
     bubbles
       .append("circle")
       .attr("r", (d: any) => d.r)
@@ -88,28 +94,37 @@ export default function HeatSphere({ data }: HeatSphereProps) {
       .attr("stroke-width", 1.5)
       .attr("stroke-opacity", 0.4);
 
-    // Label
+    // Short label (first word or ticker-like string)
     bubbles
       .append("text")
-      .text((d: any) => d.label)
+      .text((d: any) => {
+        const label = d.label || d.id;
+        // If it looks like a ticker (short all-caps or r/subreddit), use as-is
+        if (label.length <= 8 || label.startsWith("r/")) return label;
+        // Otherwise use first meaningful word
+        const words = label.split(/\s+/).filter((w: string) => w.length > 2);
+        return words[0]?.substring(0, 10) || label.substring(0, 8);
+      })
       .attr("text-anchor", "middle")
-      .attr("dy", (d: any) => d.r > 25 ? "-0.2em" : "0.35em")
+      .attr("dy", (d: any) => (d.r > 20 ? "-0.15em" : "0.35em"))
       .attr("font-family", "Roboto Mono, monospace")
-      .attr("font-size", (d: any) => Math.max(8, Math.min(d.r / 2.8, 14)))
+      .attr("font-size", (d: any) => Math.max(7, Math.min(d.r / 2.8, 13)))
       .attr("font-weight", 600)
       .attr("fill", "#0A0E12")
       .attr("pointer-events", "none");
 
-    // Trend arrow (only on larger bubbles)
+    // Volume count (only on larger bubbles)
     bubbles
-      .filter((d: any) => d.r > 25)
+      .filter((d: any) => d.r > 22)
       .append("text")
-      .text((d: any) => d.priceChange24h >= 0 ? "↗" : "↘")
+      .text((d: any) => d.volume >= 1000 ? `${(d.volume / 1000).toFixed(0)}K` : d.volume)
       .attr("text-anchor", "middle")
       .attr("dy", "1.1em")
-      .attr("font-size", (d: any) => Math.max(8, d.r / 3.5))
-      .attr("fill", (d: any) => d.priceChange24h >= 0 ? "#00FFC2" : "#FF4B2B")
-      .attr("opacity", 0.9)
+      .attr("font-family", "Roboto Mono, monospace")
+      .attr("font-size", (d: any) => Math.max(7, d.r / 4))
+      .attr("font-weight", 400)
+      .attr("fill", "#0A0E12")
+      .attr("opacity", 0.7)
       .attr("pointer-events", "none");
 
     bubbles
@@ -129,7 +144,8 @@ export default function HeatSphere({ data }: HeatSphereProps) {
         setTooltip(null);
       })
       .on("click", (_: any, d: any) => {
-        router.push(`/alpha/${d.id}`);
+        setTooltip(null);
+        setModal(d);
       });
 
     simulation.on("tick", () => {
@@ -139,7 +155,7 @@ export default function HeatSphere({ data }: HeatSphereProps) {
     return () => {
       simulation.stop();
     };
-  }, [data, router]);
+  }, [data]);
 
   return (
     <div ref={containerRef} className="card relative w-full h-full min-h-[420px]">
@@ -153,30 +169,186 @@ export default function HeatSphere({ data }: HeatSphereProps) {
       </div>
       <svg ref={svgRef} className="w-full h-[calc(100%-28px)]" />
 
+      {/* Hover tooltip */}
       {tooltip && (
         <div
-          className="absolute z-50 bg-surface-alt border border-bullish/30 rounded-lg px-3 py-2.5 pointer-events-none shadow-lg"
+          className="absolute z-50 bg-surface-alt border border-bullish/30 rounded-lg px-3 py-2.5 pointer-events-none shadow-lg max-w-[260px]"
           style={{
-            left: Math.min(tooltip.x + 12, (containerRef.current?.clientWidth || 600) - 220),
+            left: Math.min(tooltip.x + 12, (containerRef.current?.clientWidth || 600) - 270),
             top: tooltip.y - 10,
           }}
         >
-          <p className="font-mono font-semibold text-sm text-text-primary">
+          <p className="font-mono font-semibold text-sm text-text-primary truncate">
             {tooltip.sector.label}
-            <span className="text-neutral mx-1.5">|</span>
-            <span className={tooltip.sector.sentiment > 0.5 ? "text-bullish" : "text-bearish"}>
-              {Math.round(tooltip.sector.sentiment * 100)}% {tooltip.sector.sentiment > 0.5 ? "Pos" : "Neg"}
-            </span>
           </p>
+          <p className="text-xs mt-1">
+            <span className={tooltip.sector.sentiment > 0.5 ? "text-bullish" : tooltip.sector.sentiment < 0.45 ? "text-bearish" : "text-neutral"}>
+              Sentiment: {Math.round(tooltip.sector.sentiment * 100)}%
+            </span>
+            <span className="text-text-muted ml-2">Vol: {tooltip.sector.volume.toLocaleString()}</span>
+          </p>
+          {tooltip.sector.keywords.length > 0 && (
+            <p className="text-xs text-text-muted mt-1 truncate">
+              {tooltip.sector.keywords.join(", ")}
+            </p>
+          )}
           <p className="text-xs text-text-muted mt-1">
-            Keywords: {tooltip.sector.keywords.join(", ")}
+            Sources: {tooltip.sector.sector}
           </p>
-          <p className="text-xs text-text-muted mt-0.5">
-            24h: <span className={tooltip.sector.priceChange24h >= 0 ? "text-bullish" : "text-bearish"}>
-              {tooltip.sector.priceChange24h > 0 ? "+" : ""}{tooltip.sector.priceChange24h}%
-            </span>
-            <span className="ml-2">Vol: {(tooltip.sector.volume / 1000).toFixed(0)}K</span>
-          </p>
+          <p className="text-xs text-accent-blue mt-1">Click for details</p>
+        </div>
+      )}
+
+      {/* Detail modal */}
+      {modal && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-4"
+          onClick={() => setModal(null)}
+        >
+          <div
+            className="bg-surface border border-border rounded-xl max-w-lg w-full max-h-[80vh] overflow-y-auto p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-text-primary">
+                  {modal.label}
+                </h3>
+                <p className="text-sm text-text-muted mt-0.5">
+                  Entity: <span className="font-mono text-text-secondary">{modal.id}</span>
+                </p>
+              </div>
+              <button
+                onClick={() => setModal(null)}
+                className="text-text-muted hover:text-text-primary p-1"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="bg-surface-alt rounded-lg p-3 text-center">
+                <p className="text-xs text-text-muted">Sentiment</p>
+                <p className={`text-xl font-mono font-semibold ${
+                  modal.sentiment > 0.6 ? "text-bullish" : modal.sentiment < 0.4 ? "text-bearish" : "text-neutral"
+                }`}>
+                  {Math.round(modal.sentiment * 100)}%
+                </p>
+              </div>
+              <div className="bg-surface-alt rounded-lg p-3 text-center">
+                <p className="text-xs text-text-muted">Mentions</p>
+                <p className="text-xl font-mono font-semibold text-text-primary">
+                  {modal.volume.toLocaleString()}
+                </p>
+              </div>
+              <div className="bg-surface-alt rounded-lg p-3 text-center">
+                <p className="text-xs text-text-muted">Sources</p>
+                <p className="text-xl font-mono font-semibold text-accent-blue">
+                  {modal.uniqueSources || Object.keys(modal.sources || {}).length}
+                </p>
+              </div>
+            </div>
+
+            {/* Why this bubble */}
+            <div className="mb-4">
+              <h4 className="text-sm font-semibold text-text-secondary mb-2">
+                Why this entity is highlighted
+              </h4>
+              <p className="text-sm text-text-primary leading-relaxed">
+                <span className="font-mono font-medium">{modal.id}</span> has been mentioned{" "}
+                <span className="text-bullish font-semibold">{modal.volume.toLocaleString()}</span>{" "}
+                times across{" "}
+                <span className="text-accent-blue font-semibold">
+                  {Object.keys(modal.sources || {}).length} platform{Object.keys(modal.sources || {}).length !== 1 ? "s" : ""}
+                </span>{" "}
+                ({Object.keys(modal.sources || {}).join(", ")}).
+                {modal.sentiment > 0.6
+                  ? " Overall sentiment is bullish."
+                  : modal.sentiment < 0.4
+                  ? " Overall sentiment is bearish — potential risk signal."
+                  : " Sentiment is neutral."}
+              </p>
+            </div>
+
+            {/* Source breakdown */}
+            {modal.sources && Object.keys(modal.sources).length > 0 && (
+              <div className="mb-4">
+                <h4 className="text-sm font-semibold text-text-secondary mb-2">
+                  Source Breakdown
+                </h4>
+                <div className="space-y-1.5">
+                  {Object.entries(modal.sources)
+                    .sort(([, a], [, b]) => (b as number) - (a as number))
+                    .map(([source, count]) => (
+                      <div key={source} className="flex items-center gap-2">
+                        <span className="text-xs text-text-muted w-24">{source}</span>
+                        <div className="flex-1 h-2 bg-surface-alt rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-accent-blue rounded-full"
+                            style={{ width: `${Math.min(100, ((count as number) / modal.volume) * 100)}%` }}
+                          />
+                        </div>
+                        <span className="text-xs font-mono text-text-secondary w-10 text-right">
+                          {(count as number).toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            {/* Keywords */}
+            {modal.keywords.length > 0 && (
+              <div className="mb-4">
+                <h4 className="text-sm font-semibold text-text-secondary mb-2">Keywords</h4>
+                <div className="flex flex-wrap gap-1.5">
+                  {modal.keywords.map((kw, i) => (
+                    <span key={i} className="px-2 py-0.5 bg-surface-alt text-xs text-text-secondary rounded-md">
+                      {kw}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Sample sources */}
+            {modal.sampleDocs && modal.sampleDocs.length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold text-text-secondary mb-2">
+                  Source Documents
+                </h4>
+                <div className="space-y-2">
+                  {modal.sampleDocs.map((doc, i) => (
+                    <div key={i} className="bg-surface-alt rounded-lg p-3 border border-border">
+                      <p className="text-sm text-text-primary leading-snug">
+                        {doc.title}
+                      </p>
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <span className="text-xs text-text-muted">{doc.source}</span>
+                        {doc.score > 0 && (
+                          <span className="text-xs font-mono text-text-muted">
+                            score: {doc.score}
+                          </span>
+                        )}
+                        {doc.url && (
+                          <a
+                            href={doc.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs text-accent-blue hover:underline flex items-center gap-0.5 ml-auto"
+                          >
+                            Open <ExternalLink size={10} />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

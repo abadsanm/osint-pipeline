@@ -114,31 +114,78 @@ def _consume_raw_topics():
                 pipeline_stats["sources"][source] += 1
 
                 # Track entity mentions for heat sphere
-                entity_id = doc.get("entity_id")
-                if entity_id:
-                    if entity_id not in entity_mentions:
-                        entity_mentions[entity_id] = {
-                            "id": entity_id,
-                            "label": entity_id,
-                            "volume": 0,
-                            "sentiment": 0.5,
-                            "sources": defaultdict(int),
-                            "keywords": [],
-                            "last_seen": None,
-                        }
-                    em = entity_mentions[entity_id]
-                    em["volume"] += 1
-                    em["sources"][source] += 1
-                    em["last_seen"] = doc.get("ingested_at")
-
-                    # Extract keywords from title
-                    title = doc.get("title", "")
-                    if title and len(em["keywords"]) < 5:
-                        words = [w for w in title.split()[:3] if len(w) > 3]
-                        em["keywords"] = list(set(em["keywords"] + words))[:5]
+                _track_entity_from_doc(doc)
 
         except Exception as e:
             log.warning("Failed to process raw message: %s", e)
+
+
+def _track_entity_from_doc(doc: dict):
+    """Track entity mentions from a document (called under _lock)."""
+    source = doc.get("source", "unknown")
+    title = doc.get("title", "")
+    quality_score = (doc.get("quality_signals") or {}).get("score") or 0
+    engagement = (doc.get("quality_signals") or {}).get("engagement_count") or 0
+
+    entities_to_track = []
+    for ent in doc.get("entities", []):
+        ent_text = ent.get("text", "")
+        # Skip short, numeric-only, or common noise entities
+        if ent_text and len(ent_text) > 1 and not ent_text.isdigit():
+            entities_to_track.append(ent_text)
+
+    entity_id = doc.get("entity_id")
+    # Skip numeric entity IDs (HN parent story IDs) — prefer named entities
+    if entity_id and not entity_id.isdigit() and entity_id not in entities_to_track:
+        entities_to_track.append(entity_id)
+
+    for eid in entities_to_track:
+        if eid not in entity_mentions:
+            entity_mentions[eid] = {
+                "id": eid,
+                "label": eid,
+                "volume": 0,
+                "sentiment_sum": 0.0,
+                "sentiment_count": 0,
+                "sources": defaultdict(int),
+                "keywords": [],
+                "sample_docs": [],
+                "last_seen": None,
+            }
+        em = entity_mentions[eid]
+        em["volume"] += 1
+        em["sources"][source] += 1
+        em["last_seen"] = doc.get("ingested_at")
+
+        # Compute sentiment from engagement signals
+        # Higher engagement = more positive signal (0.3-0.9 range)
+        if quality_score and quality_score > 0:
+            import math
+            # Log-scale: 1 point=0.3, 10=0.5, 100=0.7, 1000=0.9
+            norm = 0.3 + 0.6 * min(1.0, math.log1p(quality_score) / math.log1p(1000))
+            em["sentiment_sum"] += norm
+            em["sentiment_count"] += 1
+        elif engagement and engagement > 0:
+            import math
+            norm = 0.3 + 0.6 * min(1.0, math.log1p(engagement) / math.log1p(500))
+            em["sentiment_sum"] += norm
+            em["sentiment_count"] += 1
+
+        if title and (em["label"] == eid or em["label"].isdigit()):
+            em["label"] = title[:60]
+
+        if title and len(em["keywords"]) < 8:
+            words = [w for w in title.split() if len(w) > 3][:3]
+            em["keywords"] = list(set(em["keywords"] + words))[:8]
+
+        if len(em["sample_docs"]) < 5:
+            em["sample_docs"].append({
+                "title": title[:120] if title else doc.get("content_text", "")[:120],
+                "source": source,
+                "url": doc.get("url"),
+                "created_at": doc.get("created_at"),
+                "score": quality_score,
+            })
 
 
 def _consume_signals():
@@ -180,6 +227,9 @@ def _consume_signals():
 
                 if topic == "osint.normalized":
                     pipeline_stats["total_normalized"] += 1
+                    # Track entities from normalized docs (they have NER entities)
+                    _track_entity_from_doc(data)
+
                 elif topic.startswith("osint.correlated"):
                     pipeline_stats["total_correlated"] += 1
 
@@ -272,15 +322,27 @@ def get_sectors(limit: int = Query(30, ge=1, le=100)):
 
     result = []
     for e in entities:
-        total_sources = sum(e["sources"].values()) if isinstance(e["sources"], dict) else 0
+        # Compute actual sentiment from accumulated scores
+        if e.get("sentiment_count", 0) > 0:
+            sentiment = e["sentiment_sum"] / e["sentiment_count"]
+        else:
+            sentiment = 0.5
+
+        # Build source list
+        sources_dict = dict(e["sources"]) if isinstance(e["sources"], dict) else {}
+        source_list = sorted(sources_dict.keys())
+
         result.append({
             "id": e["id"],
             "label": e["label"],
-            "sector": "Multi-source",
-            "sentiment": e.get("sentiment", 0.5),
+            "sector": ", ".join(source_list) if source_list else "Unknown",
+            "sentiment": round(sentiment, 3),
             "volume": e["volume"],
-            "priceChange24h": 0,
-            "keywords": e["keywords"][:3],
+            "priceChange24h": round((sentiment - 0.5) * 10, 1),  # Derive from sentiment
+            "keywords": e["keywords"][:5],
+            "sources": sources_dict,
+            "sampleDocs": e.get("sample_docs", []),
+            "uniqueSources": len(source_list),
         })
 
     return result
