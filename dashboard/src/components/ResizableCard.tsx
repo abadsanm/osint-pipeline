@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { GripHorizontal } from "lucide-react";
 
 interface ResizableCardProps {
@@ -9,6 +9,7 @@ interface ResizableCardProps {
   minHeight?: number;
   maxHeight?: number;
   handlePosition?: "top" | "bottom";
+  resetKey?: number;
 }
 
 export default function ResizableCard({
@@ -17,9 +18,15 @@ export default function ResizableCard({
   minHeight = 100,
   maxHeight = 900,
   handlePosition = "bottom",
+  resetKey = 0,
 }: ResizableCardProps) {
   const [height, setHeight] = useState(defaultHeight);
   const dragging = useRef(false);
+
+  // Reset height when resetKey changes
+  useEffect(() => {
+    setHeight(defaultHeight);
+  }, [resetKey, defaultHeight]);
 
   const onDragStart = useCallback(
     (e: React.MouseEvent) => {

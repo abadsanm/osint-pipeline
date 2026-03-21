@@ -127,9 +127,10 @@ function EconomicSentimentCard({ data }: { data: BarData[] }) {
                     : "#FF4B2B";
                 return (
                   <rect
-                    {...props}
-                    height={12}
+                    x={props.x}
                     y={props.y + (props.height - 12) / 2}
+                    width={props.width}
+                    height={12}
                     fill={fill}
                     rx={3}
                     ry={3}
