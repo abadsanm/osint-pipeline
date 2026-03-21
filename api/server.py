@@ -19,6 +19,19 @@ import uuid
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import Optional
+from pathlib import Path
+
+# Load .env file if it exists
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.exists():
+    with open(_env_path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                key, value = key.strip(), value.strip()
+                if value and key not in os.environ:
+                    os.environ[key] = value
 
 # Unique instance ID — ensures each API restart re-reads Kafka from earliest
 _INSTANCE_ID = uuid.uuid4().hex[:8]
