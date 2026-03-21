@@ -262,6 +262,42 @@ export default function AnalysisModal({
           )}
         </div>
 
+        {/* Source links */}
+        {entity.sampleDocs && entity.sampleDocs.length > 0 && (
+          <div className="px-5 py-3 border-t border-border">
+            <h4 className="text-[11px] uppercase tracking-widest text-text-muted font-semibold mb-2">
+              Sources
+            </h4>
+            <div className="space-y-1.5">
+              {entity.sampleDocs
+                .filter((d: any) => d.url || d.title)
+                .slice(0, 5)
+                .map((doc: any, i: number) => (
+                  <div key={i} className="flex items-start gap-2 text-xs">
+                    <span className="text-text-muted flex-shrink-0 mt-0.5 w-16 text-right font-mono">
+                      {doc.source || "unknown"}
+                    </span>
+                    {doc.url ? (
+                      <a
+                        href={doc.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-accent-blue hover:underline truncate flex items-center gap-1"
+                      >
+                        {doc.title || doc.url}
+                        <ExternalLink size={10} className="flex-shrink-0 opacity-50" />
+                      </a>
+                    ) : (
+                      <span className="text-text-secondary truncate">
+                        {doc.title || doc.headline || "Untitled"}
+                      </span>
+                    )}
+                  </div>
+                ))}
+            </div>
+          </div>
+        )}
+
         {/* Actions footer */}
         <div className="sticky bottom-0 bg-surface border-t border-border px-5 py-3 flex items-center justify-between rounded-b-xl">
           <div className="flex items-center gap-2">
