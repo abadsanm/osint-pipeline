@@ -1,7 +1,11 @@
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// Use the real (on-disk) casing so webpack never sees two different paths
+const __dirname = fs.realpathSync.native(
+  path.dirname(fileURLToPath(import.meta.url))
+);
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -10,7 +14,7 @@ const nextConfig = {
     config.resolve.symlinks = false;
     config.snapshot = {
       ...config.snapshot,
-      managedPaths: [path.resolve(__dirname, "node_modules")],
+      managedPaths: [path.join(__dirname, "node_modules")],
     };
     return config;
   },
