@@ -50,11 +50,13 @@ export default function HeatSphere({ data }: HeatSphereProps) {
     svg.selectAll("*").remove();
     svg.attr("width", width).attr("height", height);
 
-    // Color scale: bearish (0) -> neutral (0.5) -> bullish (1)
+    // Color scale: bearish -> neutral -> bullish
+    // Amplify differences: remap 0.3-0.7 range to full color spectrum
     const colorScale = d3
       .scaleLinear<string>()
-      .domain([0, 0.3, 0.5, 0.7, 1])
-      .range(["#FF4B2B", "#E88A5A", "#8B949E", "#5CB88A", "#00FFC2"]);
+      .domain([0.3, 0.42, 0.5, 0.58, 0.7])
+      .range(["#FF4B2B", "#E88A5A", "#8B949E", "#5CB88A", "#00FFC2"])
+      .clamp(true);
 
     const maxVol = d3.max(data, (d) => d.volume) || 1;
     const radiusScale = d3
@@ -71,11 +73,11 @@ export default function HeatSphere({ data }: HeatSphereProps) {
 
     const simulation = d3
       .forceSimulation(nodes as any)
-      .force("x", d3.forceX(width / 2).strength(0.04))
-      .force("y", d3.forceY(height / 2).strength(0.04))
-      .force("collision", d3.forceCollide((d: any) => d.r + 2).strength(0.9))
-      .force("charge", d3.forceManyBody().strength(-3))
-      .alphaDecay(0.015);
+      .force("x", d3.forceX(width / 2).strength(0.05))
+      .force("y", d3.forceY(height / 2).strength(0.05))
+      .force("collision", d3.forceCollide((d: any) => d.r + 3).strength(1))
+      .force("charge", d3.forceManyBody().strength(-8))
+      .alphaDecay(0.012);
 
     const bubbleGroup = svg.append("g");
 
@@ -94,37 +96,21 @@ export default function HeatSphere({ data }: HeatSphereProps) {
       .attr("stroke-width", 1.5)
       .attr("stroke-opacity", 0.4);
 
-    // Short label (first word or ticker-like string)
+    // Entity name label
     bubbles
       .append("text")
       .text((d: any) => {
         const label = d.label || d.id;
-        // If it looks like a ticker (short all-caps or r/subreddit), use as-is
-        if (label.length <= 8 || label.startsWith("r/")) return label;
-        // Otherwise use first meaningful word
+        if (label.length <= 10 || label.startsWith("r/")) return label;
         const words = label.split(/\s+/).filter((w: string) => w.length > 2);
-        return words[0]?.substring(0, 10) || label.substring(0, 8);
+        return words[0]?.substring(0, 12) || label.substring(0, 10);
       })
       .attr("text-anchor", "middle")
-      .attr("dy", (d: any) => (d.r > 20 ? "-0.15em" : "0.35em"))
-      .attr("font-family", "Roboto Mono, monospace")
-      .attr("font-size", (d: any) => Math.max(7, Math.min(d.r / 2.8, 13)))
+      .attr("dy", "0.35em")
+      .attr("font-family", "Inter, system-ui, sans-serif")
+      .attr("font-size", (d: any) => Math.max(8, Math.min(d.r / 2.5, 14)))
       .attr("font-weight", 600)
       .attr("fill", "#0A0E12")
-      .attr("pointer-events", "none");
-
-    // Volume count (only on larger bubbles)
-    bubbles
-      .filter((d: any) => d.r > 22)
-      .append("text")
-      .text((d: any) => d.volume >= 1000 ? `${(d.volume / 1000).toFixed(0)}K` : d.volume)
-      .attr("text-anchor", "middle")
-      .attr("dy", "1.1em")
-      .attr("font-family", "Roboto Mono, monospace")
-      .attr("font-size", (d: any) => Math.max(7, d.r / 4))
-      .attr("font-weight", 400)
-      .attr("fill", "#0A0E12")
-      .attr("opacity", 0.7)
       .attr("pointer-events", "none");
 
     bubbles
@@ -158,7 +144,7 @@ export default function HeatSphere({ data }: HeatSphereProps) {
   }, [data]);
 
   return (
-    <div ref={containerRef} className="card relative w-full h-full min-h-[420px]">
+    <div ref={containerRef} className="card relative w-full h-full min-h-0 overflow-hidden">
       <div className="flex items-center justify-between mb-1">
         <h2 className="text-sm font-semibold text-text-secondary">
           Sentiment Heat-Sphere

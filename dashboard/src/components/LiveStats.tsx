@@ -20,7 +20,7 @@ export default function LiveStats({ stats }: LiveStatsProps) {
   );
 
   return (
-    <div className="card mb-module-gap-lg">
+    <div className="bg-surface border border-border rounded-card px-3 py-1.5">
       <div className="flex items-center gap-6 text-xs">
         <div className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-bullish animate-pulse" />

@@ -93,7 +93,8 @@ export default function InnovationPage() {
                 <Bar
                   dataKey="volume"
                   fill="#FF4B2B"
-                  radius={[0, 4, 4, 0]}
+                  radius={[0, 3, 3, 0]}
+                  barSize={14}
                   opacity={0.8}
                 />
               </BarChart>

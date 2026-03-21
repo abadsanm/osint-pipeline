@@ -248,6 +248,10 @@ def _consume_signals():
                         "timestamp": data.get("created_at", datetime.now(timezone.utc).isoformat()),
                         "confidence": data.get("confidence_score", 0),
                     }
+                    # Skip signals with numeric-only entity names
+                    if signal_entry["ticker"].isdigit():
+                        continue
+
                     # Deduplicate by entity+headline
                     dedup_key = f"{signal_entry['ticker']}:{signal_entry['headline']}"
                     existing_keys = {f"{s['ticker']}:{s['headline']}" for s in signals}

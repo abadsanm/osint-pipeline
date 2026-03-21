@@ -77,7 +77,7 @@ function HorizontalBarCard({
               tickLine={false}
               width={55}
             />
-            <Bar dataKey="score" fill={color} radius={[0, 4, 4, 0]} />
+            <Bar dataKey="score" fill={color} radius={[0, 3, 3, 0]} barSize={12} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -130,7 +130,8 @@ function EconomicSentimentCard({
             />
             <Bar
               dataKey="score"
-              radius={[0, 4, 4, 0]}
+              radius={[0, 3, 3, 0]}
+              barSize={12}
               fill="#8B949E"
               shape={(props: any) => {
                 const fill =
@@ -140,9 +141,11 @@ function EconomicSentimentCard({
                 return (
                   <rect
                     {...props}
+                    height={12}
+                    y={props.y + (props.height - 12) / 2}
                     fill={fill}
-                    rx={4}
-                    ry={4}
+                    rx={3}
+                    ry={3}
                   />
                 );
               }}
@@ -242,7 +245,7 @@ export default function ChartCards({
   macroTimeline,
 }: ChartCardsProps) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-module-gap">
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 h-full min-h-[140px]">
       <MacroSentimentCard
         title="Macro Sentiment vs. S&P 500"
         data={macroTimeline}
