@@ -4,51 +4,53 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A multi-pillar OSINT analytics platform that ingests public data from multiple sources, normalizes and cross-correlates it, then routes signals to two downstream value engines: **Stock Alpha** (FinBERT sentiment + time-series forecasting) and **Product Ideation** (ABSA + gap analysis on consumer reviews). An ethical compliance layer (GDPR/CCPA/EU AI Act, PII scrubbing via Presidio) wraps the entire system.
+A multi-pillar OSINT analytics platform that ingests public data from multiple sources, normalizes and cross-correlates it, then routes signals to two downstream value engines: **Stock Alpha** (FinBERT sentiment + SVC metrics + technical indicators) and **Product Ideation** (ABSA + gap analysis on consumer reviews). An ethical compliance layer (GDPR/CCPA/EU AI Act, PII scrubbing via Presidio) wraps the entire system. A **Sentinel dashboard** (Next.js) provides the visualization frontend.
 
-**Current state:** The foundation pipeline is fully built — all 6 connectors, normalization layer, and cross-correlation engine are operational. Value engines (Stock Alpha + Product Ideation) are the next phase.
+**Current state:** The entire platform is built end-to-end — 6 connectors, normalization layer, cross-correlation engine, both value engines, and the Sentinel dashboard frontend.
 
 ## Development Commands
 
 ```bash
-# Start Kafka stack (Zookeeper, Kafka, Schema Registry, Kafka UI, topic init)
-docker-compose up -d
+# === Infrastructure ===
+docker-compose up -d                    # Start Kafka stack
+docker-compose ps                       # Verify health (~30s)
 
-# Verify services are healthy (~30s after startup)
-docker-compose ps
-
-# Set up Python environment
+# === Python Backend ===
 python -m venv .venv
-source .venv/bin/activate   # or .venv\Scripts\activate on Windows
+source .venv/bin/activate               # or .venv\Scripts\activate on Windows
 pip install -r requirements.txt
+python -m normalization.models.download  # Download fastText + spaCy models
 
-# Download NLP models for normalization layer
-python -m normalization.models.download
-
-# Run individual connectors (each requires Kafka running)
+# Run connectors (each requires Kafka)
 python -m connectors.hacker_news
-python -m connectors.trustpilot        # needs TRUSTPILOT_DOMAINS env var
-python -m connectors.github            # needs GITHUB_TOKEN(S) env var
-python -m connectors.sec_insider       # optional FINNHUB_API_KEY for congressional trades
-python -m connectors.reddit            # optional REDDIT_CLIENT_ID/SECRET for OAuth
-python -m connectors.google_trends     # optional GTRENDS_KEYWORDS env var
+python -m connectors.trustpilot          # needs TRUSTPILOT_DOMAINS
+python -m connectors.github              # needs GITHUB_TOKEN(S)
+python -m connectors.sec_insider         # optional FINNHUB_API_KEY
+python -m connectors.reddit              # optional REDDIT_CLIENT_ID/SECRET
+python -m connectors.google_trends       # optional GTRENDS_KEYWORDS
 
-# Run normalization layer (consumes from all raw topics → osint.normalized)
-python -m normalization
+# Run processing layers
+python -m normalization                  # raw topics → osint.normalized
+python -m correlation                    # osint.normalized → correlated signals
 
-# Run cross-correlation engine (consumes osint.normalized → correlated signals)
-python -m correlation
+# Run value engines
+python -m stock_alpha                    # correlated → stock alpha signals (needs FinBERT)
+python -m product_ideation               # correlated → product gaps (needs PyABSA)
 
-# Verify data flow via CLI
+# Verify data flow
 docker exec osint-kafka kafka-console-consumer \
   --bootstrap-server localhost:9092 \
-  --topic tech.hn.stories \
-  --from-beginning --max-messages 5
+  --topic tech.hn.stories --from-beginning --max-messages 5
 
 # Kafka UI at http://localhost:8080
-```
 
-No formal test suite yet — tests are run inline during development.
+# === Dashboard Frontend ===
+cd dashboard
+npm install
+npm run dev                              # http://localhost:3000
+npm run build                            # Production build
+npx next lint                            # Lint check
+```
 
 ## Architecture
 
@@ -56,46 +58,71 @@ No formal test suite yet — tests are run inline during development.
 
 ```
 Source Connectors → Raw Kafka Topics → Normalization (fastText/spaCy/SimHash/Presidio)
-  → osint.normalized → Cross-Correlation Engine → osint.correlated.{stock_alpha,product_ideation,anomalies}
-  → Value Engines (TODO)
+  → osint.normalized → Cross-Correlation Engine
+    → osint.correlated.stock_alpha → Stock Alpha Engine (FinBERT + SVC + technicals)
+    → osint.correlated.product_ideation → Product Ideation Engine (ABSA + gap analysis)
+    → osint.correlated.anomalies → Review/alerting
+  → Sentinel Dashboard (Next.js)
 ```
 
 ### Package Structure
 
 - **`schemas/`** — Pydantic models shared across all subsystems
-  - `document.py` — `OsintDocument`, `EntityMention`, `QualitySignals` — the universal document format
-  - `signal.py` — `CorrelatedSignal`, `SourceContribution` — cross-correlation output format
+  - `document.py` — `OsintDocument`, `EntityMention`, `QualitySignals` — universal document format
+  - `signal.py` — `CorrelatedSignal`, `SourceContribution` — cross-correlation output
+  - `product_gap.py` — `ProductGap`, `ProductIdeationReport` — product ideation output
 
 - **`connectors/`** — Source connectors (async, aiohttp + confluent-kafka Producer)
   - `kafka_publisher.py` — Shared `KafkaPublisher` wrapper used by all connectors
-  - `hacker_news.py` — Firebase polling + Algolia keyword search (2 concurrent modes)
-  - `trustpilot.py` — Official API (cursor pagination) + web scrape fallback (__NEXT_DATA__)
-  - `github.py` — GraphQL trending search + REST events stream, PAT token pool with rate-limit-aware rotation
-  - `sec_insider.py` — EDGAR EFTS filing search + XML parsing (Forms 3/4/5), Finnhub congressional trades
-  - `reddit.py` — OAuth API + JSON fallback, financial subreddits (WSB, r/stocks, r/options, r/investing)
+  - `hacker_news.py` — Firebase polling + Algolia keyword search
+  - `trustpilot.py` — Official API (cursor pagination) + web scrape fallback
+  - `github.py` — GraphQL search + REST events, PAT token pool with rate-limit-aware rotation
+  - `sec_insider.py` — EDGAR EFTS search + ownership XML parsing (Forms 3/4/5), Finnhub congressional trades
+  - `reddit.py` — OAuth API + JSON fallback, financial subreddits
   - `google_trends.py` — pytrends: interest over time, trending searches, related queries
 
-- **`normalization/`** — NLP pipeline (sync confluent-kafka Consumer, CPU-bound)
+- **`normalization/`** — NLP pipeline (sync Kafka Consumer, CPU-bound)
   - `processors/language.py` — fastText lid.176 language detection
   - `processors/ner.py` — spaCy NER with ticker pattern matching + financial entity mapping
-  - `processors/dedup.py` — SimHash 64-bit fingerprinting with sliding window near-duplicate detection
+  - `processors/dedup.py` — SimHash 64-bit fingerprinting with near-duplicate detection
   - `processors/pii.py` — Microsoft Presidio PII scrubbing (shares spaCy model with NER)
-  - `pipeline.py` — Chains all 4 processors; failed docs route to `osint.deadletter`
-  - `models/download.py` — Downloads fastText lid.176.bin + spaCy en_core_web_lg
+  - `pipeline.py` — Chains all 4 processors; failed docs → `osint.deadletter`
 
-- **`correlation/`** — Cross-correlation engine (sync confluent-kafka Consumer)
+- **`correlation/`** — Cross-correlation engine (sync Kafka Consumer)
   - `window_store.py` — Sliding window entity store with deque-based MentionEvent tracking
   - `scoring.py` — 3-factor confidence: source diversity (40%), volume anomaly z-score (30%), quality (30%)
   - `anomaly.py` — 4 heuristics: account age clustering, temporal bursts, cross-platform sync, template content
   - `router.py` — Routes signals to stock_alpha / product_ideation / anomalies topics
-  - `engine.py` — Orchestrates ingestion, periodic evaluation, scoring, anomaly detection
+  - `engine.py` — Orchestrates ingestion, periodic window evaluation, signal emission
+
+- **`stock_alpha/`** — Stock Alpha value engine
+  - `sentiment.py` — FinBERT (ProsusAI/finbert) financial sentiment with batch inference
+  - `svc.py` — Sentiment Volume Convergence metric (sentiment_shift x volume_change)
+  - `technicals.py` — yfinance OHLCV + pandas-ta indicators (RSI, MACD, BB, SMA/EMA, ATR, OBV)
+  - `scorer.py` — Rule-based weighted scorer: sentiment 30% + SVC 20% + technicals 30% + correlation 20%
+  - `engine.py` — Orchestrates FinBERT → SVC → technicals → scoring per ticker
+
+- **`product_ideation/`** — Product Ideation value engine
+  - `absa.py` — PyABSA aspect extraction with spaCy noun-chunk fallback
+  - `feature_requests.py` — 9 regex patterns (wish/want/should/missing/why_cant/etc.)
+  - `questions.py` — Question detection + sentence-transformers embedding + DBSCAN clustering
+  - `gap_analysis.py` — Aggregates into ranked ProductGap objects with opportunity scores
+  - `engine.py` — Orchestrates ABSA + feature mining + question clustering → reports
+
+- **`dashboard/`** — Sentinel frontend (Next.js 14, TypeScript, Tailwind, D3.js, Recharts)
+  - `src/app/page.tsx` — Global Pulse: D3 heat-sphere, signal feed, 4 chart cards, timeframe selector
+  - `src/app/alpha/[ticker]/page.tsx` — Financial Alpha: price + sentiment overlay, prediction ghost, news panel
+  - `src/app/innovation/page.tsx` — Product Innovation: friction board, gap map scatter plot
+  - `src/components/` — Sidebar, Header, HeatSphere, SignalFeed, ChartCards, TimeframeSelector
+  - `data/` — Mock JSON data files for development
+  - See `dashboard/CLAUDE.md` for frontend-specific design system and build instructions
 
 ### Kafka Topics
 
 | Topic | Partitions | Purpose |
 |-------|-----------|---------|
 | `tech.hn.stories` / `tech.hn.comments` | 3/6 | HackerNews stories and comments |
-| `tech.github.events` | 3 | GitHub trending repos, issues, events |
+| `tech.github.events` | 3 | GitHub repos, issues, events |
 | `consumer.reviews.trustpilot` / `consumer.reviews.amazon` | 3/3 | Product reviews |
 | `finance.sec.insider` / `finance.congress.trades` | 3/3 | SEC filings and congressional trades |
 | `finance.reddit.posts` / `finance.reddit.comments` | 6/6 | Reddit financial subreddit content |
@@ -105,33 +132,44 @@ Source Connectors → Raw Kafka Topics → Normalization (fastText/spaCy/SimHash
 | `osint.correlated` | 6 | All correlated signals |
 | `osint.correlated.stock_alpha` | 3 | Signals routed to Stock Alpha Engine |
 | `osint.correlated.product_ideation` | 3 | Signals routed to Product Ideation Engine |
-| `osint.correlated.anomalies` | 1 | Signals with coordinated inauthenticity flags |
+| `osint.correlated.anomalies` | 1 | Coordinated inauthenticity flags |
+| `stock.alpha.signals` | 3 | Scored stock alpha signals |
+| `product.ideation.gaps` | 3 | Product opportunity reports |
 
 ## Conventions
 
-- All connectors must produce `OsintDocument` instances (never raw dicts to Kafka)
+- All connectors produce `OsintDocument` instances (never raw dicts to Kafka)
 - `dedup_hash` must be computed before publishing (`doc.compute_dedup_hash()`)
 - Kafka messages use `entity_id` or `source_id` as partition key (see `to_kafka_key()`)
 - Every subsystem follows the Config class pattern: class-level attributes, `load_config_from_env()` function
-- Connectors are async (aiohttp); normalization and correlation are sync (CPU-bound NLP / stateful windowing)
-- Cross-correlation confidence scores must accompany all signals to value engines — never act on single-source signals
+- Connectors are async (aiohttp); normalization, correlation, and value engines are sync (CPU-bound)
+- Cross-correlation confidence scores must accompany all signals — never act on single-source signals
 - Source reliability weights: SEC (1.0) > News/Trends (0.8) > GitHub (0.7) > TrustPilot (0.6) > HN (0.5) > Reddit (0.4)
+- Dashboard: Tailwind-only styling, all chart components accept data as props, D3 logic in custom hooks
+- No sentiment model guarantees profitable trades — these are research tools for informational edges
 
 ## Tech Stack
 
+### Python Backend
 - **Python 3.12+**, **Pydantic v2** for data validation
 - **confluent-kafka** for Kafka producer/consumer
 - **aiohttp** for async HTTP in connectors
-- **spaCy** (en_core_web_lg) for NER
-- **fastText** (lid.176) for language detection
+- **spaCy** (en_core_web_lg) for NER, **fastText** (lid.176) for language detection
 - **Microsoft Presidio** for PII detection/anonymization
-- **pytrends** for Google Trends ingestion
-- **Docker / docker-compose** for infrastructure (Confluent Kafka images v7.6.1)
-- **Planned:** FinBERT (financial sentiment), ABSA pipeline (product reviews)
+- **pytrends** for Google Trends
+- **transformers + torch** (ProsusAI/finbert) for financial sentiment
+- **yfinance + pandas-ta** for stock price data and technical indicators
+- **PyABSA** for aspect-based sentiment, **sentence-transformers** for question clustering
+- **Docker / docker-compose** (Confluent Kafka v7.6.1)
+
+### Dashboard Frontend
+- **Next.js 14** (App Router, TypeScript strict)
+- **Tailwind CSS** (dark mode, custom design tokens)
+- **D3.js** for force-directed heat-sphere visualization
+- **Recharts** for standard charts (line, bar, scatter, composed)
+- **Lucide React** for icons, **Inter + Roboto Mono** fonts
 
 ## Environment Variables
-
-Each connector/subsystem loads config from env vars. Key ones:
 
 | Variable | Used By | Purpose |
 |----------|---------|---------|
@@ -146,12 +184,14 @@ Each connector/subsystem loads config from env vars. Key ones:
 | `GTRENDS_KEYWORDS` | google_trends | Keywords to track interest for |
 | `SPACY_MODEL` | normalization | Override spaCy model (default: en_core_web_lg) |
 | `FASTTEXT_MODEL_PATH` | normalization | Path to lid.176.bin |
+| `FINBERT_MODEL` | stock_alpha | Override FinBERT model (default: ProsusAI/finbert) |
 
 ## Known Issues
 
 - `docker-compose.yml` `init-topics` container needs a longer wait-for-kafka before creating topics
 - `docker-compose.yml` has deprecated `version` attribute (remove it)
-- `wait_for_kafka()` is duplicated across every connector/subsystem — should extract to shared utility
+- `wait_for_kafka()` is duplicated across every subsystem — should extract to shared utility
+- Dashboard `npm run build` has prerender warnings for client-only pages (dev server works fine)
 
 ## Project Context
 
