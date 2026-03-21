@@ -1,5 +1,6 @@
 "use client";
 
+import { MoreHorizontal } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -42,9 +43,12 @@ function HorizontalBarCard({
 }) {
   return (
     <div className="card flex flex-col h-full">
-      <h3 className="text-xs font-semibold text-text-secondary mb-3">
-        {title}
-      </h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
+          {title}
+        </h3>
+        <button className="text-text-muted hover:text-text-primary p-0.5"><MoreHorizontal size={14} /></button>
+      </div>
       <div className="flex-1 min-h-0">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
@@ -90,9 +94,12 @@ function EconomicSentimentCard({
 }) {
   return (
     <div className="card flex flex-col h-full">
-      <h3 className="text-xs font-semibold text-text-secondary mb-3">
-        {title}
-      </h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
+          {title}
+        </h3>
+        <button className="text-text-muted hover:text-text-primary p-0.5"><MoreHorizontal size={14} /></button>
+      </div>
       <div className="flex-1 min-h-0">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart
@@ -156,9 +163,12 @@ function MacroSentimentCard({
 }) {
   return (
     <div className="card flex flex-col h-full">
-      <h3 className="text-xs font-semibold text-text-secondary mb-3">
-        {title}
-      </h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
+          {title}
+        </h3>
+        <button className="text-text-muted hover:text-text-primary p-0.5"><MoreHorizontal size={14} /></button>
+      </div>
       <div className="flex-1 min-h-0">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart
