@@ -43,12 +43,16 @@ export function useStats() {
   );
 }
 
-export function useSignals(limit = 20) {
-  return useApiData("/signals?limit=" + limit, [], 3000);
+export function useSignals(limit = 20, timeframe?: string) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (timeframe) params.set("since", timeframe);
+  return useApiData(`/signals?${params}`, [], 3000);
 }
 
-export function useSectors(limit = 30) {
-  return useApiData("/sectors?limit=" + limit, [], 5000);
+export function useSectors(limit = 30, timeframe?: string) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (timeframe) params.set("since", timeframe);
+  return useApiData(`/sectors?${params}`, [], 5000);
 }
 
 export function useTopics() {

@@ -291,6 +291,39 @@ def _build_headline(data: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _parse_since(since: Optional[str]) -> Optional[str]:
+    """Convert a timeframe preset or ISO string to an ISO cutoff timestamp."""
+    if not since:
+        return None
+
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+
+    presets = {
+        "1D": timedelta(days=1),
+        "5D": timedelta(days=5),
+        "1M": timedelta(days=30),
+        "YTD": now - datetime(now.year, 1, 1, tzinfo=timezone.utc),
+        "1Y": timedelta(days=365),
+        "5Y": timedelta(days=365 * 5),
+    }
+
+    if since.upper() in presets:
+        delta = presets[since.upper()]
+        if isinstance(delta, timedelta):
+            cutoff = now - delta
+        else:
+            cutoff = datetime(now.year, 1, 1, tzinfo=timezone.utc)
+        return cutoff.isoformat()
+
+    # Assume ISO string
+    return since
+
+
+# ---------------------------------------------------------------------------
 # API Endpoints
 # ---------------------------------------------------------------------------
 
@@ -311,20 +344,37 @@ def stats():
 
 
 @app.get("/api/signals")
-def get_signals(limit: int = Query(20, ge=1, le=100)):
+def get_signals(
+    limit: int = Query(20, ge=1, le=100),
+    since: Optional[str] = Query(None, description="ISO timestamp or preset: 1D,5D,1M,YTD,1Y,5Y"),
+):
     """Recent correlated signals for the signal feed."""
+    cutoff = _parse_since(since)
     with _lock:
-        items = list(signals)[-limit:]
+        if cutoff:
+            items = [s for s in signals if s.get("timestamp", "") >= cutoff][-limit:]
+        else:
+            items = list(signals)[-limit:]
     items.reverse()
     return items
 
 
 @app.get("/api/sectors")
-def get_sectors(limit: int = Query(30, ge=1, le=100)):
+def get_sectors(
+    limit: int = Query(30, ge=1, le=100),
+    since: Optional[str] = Query(None, description="ISO timestamp or preset: 1D,5D,1M,YTD,1Y,5Y"),
+):
     """Entity mentions aggregated as sectors for the heat sphere."""
+    # Note: entity_mentions is cumulative; since filtering applies to last_seen
+    cutoff = _parse_since(since)
     with _lock:
+        if cutoff:
+            filtered = {k: v for k, v in entity_mentions.items()
+                        if v.get("last_seen") and v["last_seen"] >= cutoff}
+        else:
+            filtered = entity_mentions
         entities = sorted(
-            entity_mentions.values(),
+            filtered.values(),
             key=lambda e: e["volume"],
             reverse=True,
         )[:limit]

@@ -16,10 +16,12 @@ import signalsData from "../../data/signals.json";
 import sectorSentiment from "../../data/sectorSentiment.json";
 
 export default function GlobalPulsePage() {
-  const liveSignals = useSignals();
-  const liveSectors = useSectors();
-  const stats = useStats();
+  const [timeframe, setTimeframe] = useState("1D");
   const [resetKey, setResetKey] = useState(0);
+
+  const stats = useStats();
+  const liveSignals = useSignals(20, timeframe);
+  const liveSectors = useSectors(30, timeframe);
 
   const displaySignals = liveSignals.length > 0 ? liveSignals : signalsData;
   const displaySectors = liveSectors.length > 0 ? liveSectors : sectorsData;
@@ -44,6 +46,9 @@ export default function GlobalPulsePage() {
           </button>
         </div>
 
+        {/* Timeframe selector */}
+        <TimeframeSelector active={timeframe} onSelect={setTimeframe} />
+
         {/* Main: Heat Sphere + Signal Feed */}
         <ResizableCard defaultHeight={480} minHeight={200} maxHeight={800} resetKey={resetKey}>
           <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-3 h-full">
@@ -67,9 +72,6 @@ export default function GlobalPulsePage() {
             <ChartCards.Economic data={sectorSentiment.economicSentiments as any} />
           </ResizableCard>
         </div>
-
-        {/* Timeframe selector */}
-        <TimeframeSelector />
       </div>
     </div>
   );
