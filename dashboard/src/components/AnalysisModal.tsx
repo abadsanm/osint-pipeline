@@ -147,8 +147,8 @@ export default function AnalysisModal({
                 AI Analysis: {entity.label}
               </h3>
               <p className="text-[11px] text-text-muted">
-                {model === "rule-based-fallback" ? "Rule-based analysis" : "Powered by Claude"}
-                {error && " (API key not set)"}
+                {model === "rule-based-fallback" ? "Basic analysis" : "Powered by Sentinel AI"}
+                {error && " (limited mode)"}
               </p>
             </div>
           </div>
