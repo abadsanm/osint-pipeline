@@ -40,8 +40,13 @@ class PIIScrubber(BaseProcessor):
 
         # Reuse spaCy model if provided (avoids loading it twice)
         if self._spacy_nlp:
-            nlp_engine = SpacyNlpEngine(nlp={"en": self._spacy_nlp})
-            self._analyzer = AnalyzerEngine(nlp_engine=nlp_engine)
+            try:
+                # Presidio >= 2.2.355
+                nlp_engine = SpacyNlpEngine(nlp={"en": self._spacy_nlp})
+                self._analyzer = AnalyzerEngine(nlp_engine=nlp_engine)
+            except TypeError:
+                # Newer Presidio versions — let it load its own model
+                self._analyzer = AnalyzerEngine()
         else:
             self._analyzer = AnalyzerEngine()
 

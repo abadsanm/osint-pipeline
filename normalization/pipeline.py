@@ -41,13 +41,20 @@ class NormalizationPipeline:
         self._processors: list[tuple[str, BaseProcessor]] = []
 
     def setup(self) -> None:
-        """Initialize all processors. Loads models (~30s)."""
+        """Initialize all processors. Loads models (~30s).
+
+        Gracefully skips processors whose dependencies are missing
+        (e.g., fastText on Python 3.13, Presidio not installed).
+        """
         log.info("Setting up normalization pipeline...")
 
-        # 1. Language detection
-        lang_detector = LanguageDetector(NormalizationConfig.FASTTEXT_MODEL_PATH)
-        lang_detector.setup()
-        self._processors.append(("language", lang_detector))
+        # 1. Language detection (optional — fastText may not be installed)
+        try:
+            lang_detector = LanguageDetector(NormalizationConfig.FASTTEXT_MODEL_PATH)
+            lang_detector.setup()
+            self._processors.append(("language", lang_detector))
+        except Exception as e:
+            log.warning("Language detector unavailable, skipping: %s", e)
 
         # 2. NER
         ner = EntityExtractor(NormalizationConfig.SPACY_MODEL)
@@ -59,10 +66,13 @@ class NormalizationPipeline:
         dedup.setup()
         self._processors.append(("dedup", dedup))
 
-        # 4. PII — reuse spaCy NLP from NER to avoid loading it twice
-        pii = PIIScrubber(spacy_nlp=ner.nlp)
-        pii.setup()
-        self._processors.append(("pii", pii))
+        # 4. PII (optional — Presidio may not be installed)
+        try:
+            pii = PIIScrubber(spacy_nlp=ner.nlp)
+            pii.setup()
+            self._processors.append(("pii", pii))
+        except Exception as e:
+            log.warning("PII scrubber unavailable, skipping: %s", e)
 
         log.info("Pipeline ready — %d processors loaded", len(self._processors))
 
