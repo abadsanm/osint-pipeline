@@ -77,7 +77,7 @@ export default function HeatSphere({ data }: HeatSphereProps) {
       .force("y", d3.forceY(height / 2).strength(0.05))
       .force("collision", d3.forceCollide((d: any) => d.r + 3).strength(1))
       .force("charge", d3.forceManyBody().strength(-8))
-      .alphaDecay(0.012);
+      .alphaDecay(0.05); // Fast settle
 
     const bubbleGroup = svg.append("g");
 
@@ -115,7 +115,7 @@ export default function HeatSphere({ data }: HeatSphereProps) {
 
     bubbles
       .on("mouseenter", function (event: any, d: any) {
-        simulation.alphaTarget(0);
+        simulation.stop(); // Freeze all bubbles
         d3.select(this).select("circle").attr("opacity", 1).attr("stroke-width", 2.5);
         const rect = container.getBoundingClientRect();
         setTooltip({
@@ -125,7 +125,7 @@ export default function HeatSphere({ data }: HeatSphereProps) {
         });
       })
       .on("mouseleave", function () {
-        simulation.alphaTarget(0.008);
+        // Don't restart simulation — keep bubbles frozen
         d3.select(this).select("circle").attr("opacity", 0.75).attr("stroke-width", 1.5);
         setTooltip(null);
       })
@@ -133,6 +133,11 @@ export default function HeatSphere({ data }: HeatSphereProps) {
         setTooltip(null);
         setModal(d);
       });
+
+    // Stop simulation after settling (bubbles stay in place)
+    simulation.on("end", () => {
+      simulation.stop();
+    });
 
     simulation.on("tick", () => {
       bubbles.attr("transform", (d: any) => `translate(${d.x},${d.y})`);

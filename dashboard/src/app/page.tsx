@@ -17,11 +17,14 @@ import sectorSentiment from "../../data/sectorSentiment.json";
 
 export default function GlobalPulsePage() {
   const [timeframe, setTimeframe] = useState("1D");
+  const [sinceISO, setSinceISO] = useState<string | undefined>(undefined);
   const [resetKey, setResetKey] = useState(0);
 
+  // Use slider ISO if set, otherwise preset label
+  const activeFilter = sinceISO || timeframe;
   const stats = useStats();
-  const liveSignals = useSignals(20, timeframe);
-  const liveSectors = useSectors(30, timeframe);
+  const liveSignals = useSignals(20, activeFilter);
+  const liveSectors = useSectors(30, activeFilter);
 
   const displaySignals = liveSignals.length > 0 ? liveSignals : signalsData;
   const displaySectors = liveSectors.length > 0 ? liveSectors : sectorsData;
@@ -71,7 +74,11 @@ export default function GlobalPulsePage() {
         </div>
 
         {/* Timeframe selector */}
-        <TimeframeSelector active={timeframe} onSelect={setTimeframe} />
+        <TimeframeSelector
+          active={timeframe}
+          onSelect={(tf) => { setTimeframe(tf); setSinceISO(undefined); }}
+          onRangeChange={setSinceISO}
+        />
       </div>
     </div>
   );

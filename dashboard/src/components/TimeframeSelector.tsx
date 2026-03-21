@@ -14,31 +14,37 @@ const presets = [
 interface TimeframeSelectorProps {
   active?: string;
   onSelect?: (timeframe: string) => void;
+  onRangeChange?: (sinceISO: string) => void;
+}
+
+function getPresetHours(label: string): number {
+  const now = new Date();
+  if (label === "YTD") {
+    return (now.getTime() - new Date(now.getFullYear(), 0, 1).getTime()) / 3600000;
+  }
+  return presets.find((p) => p.label === label)?.hours || 24;
 }
 
 function generateTimeMarkers(totalHours: number): string[] {
   const now = new Date();
 
   if (totalHours <= 24) {
-    // Every 2 hours: 16:00, 14:00, 12:00, ...
     const markers: string[] = [];
-    for (let i = 0; i <= 24; i += 2) {
+    for (let i = 0; i <= 24; i += 4) {
       const t = new Date(now.getTime() - i * 3600000);
       markers.push(t.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }));
     }
     return markers;
   }
   if (totalHours <= 120) {
-    // Every day
     const markers: string[] = [];
     for (let i = 0; i <= 5; i++) {
       const t = new Date(now.getTime() - i * 86400000);
-      markers.push(t.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }));
+      markers.push(t.toLocaleDateString("en-US", { weekday: "short", day: "numeric" }));
     }
     return markers;
   }
   if (totalHours <= 720) {
-    // Every week
     const markers: string[] = [];
     for (let i = 0; i <= 4; i++) {
       const t = new Date(now.getTime() - i * 7 * 86400000);
@@ -47,7 +53,6 @@ function generateTimeMarkers(totalHours: number): string[] {
     return markers;
   }
   if (totalHours <= 8760) {
-    // Every 2 months
     const markers: string[] = [];
     for (let i = 0; i <= 6; i++) {
       const t = new Date(now.getFullYear(), now.getMonth() - i * 2, 1);
@@ -55,7 +60,6 @@ function generateTimeMarkers(totalHours: number): string[] {
     }
     return markers;
   }
-  // 5Y: every year
   const markers: string[] = [];
   for (let i = 0; i <= 5; i++) {
     markers.push(String(now.getFullYear() - i));
@@ -66,15 +70,30 @@ function generateTimeMarkers(totalHours: number): string[] {
 export default function TimeframeSelector({
   active: controlledActive,
   onSelect,
+  onRangeChange,
 }: TimeframeSelectorProps) {
   const [active, setActive] = useState(controlledActive || "1D");
   const [sliderLeft, setSliderLeft] = useState(0);
   const [sliderRight, setSliderRight] = useState(100);
   const trackRef = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     if (controlledActive) setActive(controlledActive);
   }, [controlledActive]);
+
+  // Emit range change with debounce
+  const emitRangeChange = useCallback((left: number, right: number, preset: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      const totalHours = getPresetHours(preset);
+      // Left slider = how far back from "now" the window starts (0% = full range ago, 100% = now)
+      // Right slider = where the window ends
+      const sinceHoursAgo = totalHours * (1 - left / 100);
+      const sinceDate = new Date(Date.now() - sinceHoursAgo * 3600000);
+      onRangeChange?.(sinceDate.toISOString());
+    }, 300);
+  }, [onRangeChange]);
 
   const handlePresetClick = (label: string) => {
     setActive(label);
@@ -89,14 +108,20 @@ export default function TimeframeSelector({
       const track = trackRef.current;
       if (!track) return;
       const trackRect = track.getBoundingClientRect();
+      const currentLeft = sliderLeft;
+      const currentRight = sliderRight;
 
       const onMove = (ev: MouseEvent) => {
         const x = ev.clientX - trackRect.left;
         const pct = Math.max(0, Math.min(100, (x / trackRect.width) * 100));
         if (handle === "left") {
-          setSliderLeft(Math.min(pct, sliderRight - 5));
+          const newLeft = Math.min(pct, currentRight - 5);
+          setSliderLeft(newLeft);
+          emitRangeChange(newLeft, currentRight, active);
         } else {
-          setSliderRight(Math.max(pct, sliderLeft + 5));
+          const newRight = Math.max(pct, currentLeft + 5);
+          setSliderRight(newRight);
+          emitRangeChange(currentLeft, newRight, active);
         }
       };
 
@@ -112,16 +137,24 @@ export default function TimeframeSelector({
       window.addEventListener("mousemove", onMove);
       window.addEventListener("mouseup", onUp);
     },
-    [sliderLeft, sliderRight]
+    [sliderLeft, sliderRight, active, emitRangeChange]
   );
 
-  const preset = presets.find((p) => p.label === active);
-  const totalHours = preset?.hours || 24;
+  const totalHours = getPresetHours(active);
   const markers = useMemo(() => generateTimeMarkers(totalHours), [totalHours]);
+
+  // Compute displayed range labels
+  const fromHoursAgo = totalHours * (1 - sliderLeft / 100);
+  const toHoursAgo = totalHours * (1 - sliderRight / 100);
+  const formatLabel = (h: number) => {
+    if (h < 1) return "Now";
+    if (h < 24) return `${Math.round(h)}h ago`;
+    if (h < 720) return `${Math.round(h / 24)}d ago`;
+    return `${Math.round(h / 720)}mo ago`;
+  };
 
   return (
     <div className="card px-4 py-2">
-      {/* Top row: presets + slider */}
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className="text-[11px] font-semibold text-text-secondary uppercase tracking-wide whitespace-nowrap">
@@ -147,42 +180,57 @@ export default function TimeframeSelector({
           </div>
         </div>
 
-        {/* Slider */}
-        <div ref={trackRef} className="flex-1 relative h-5 flex items-center">
-          {/* Track bg */}
-          <div className="w-full h-1.5 bg-border/50 rounded-full relative">
-            {/* Active range */}
-            <div
-              className="absolute h-1.5 bg-bullish/60 rounded-full"
-              style={{ left: `${sliderLeft}%`, right: `${100 - sliderRight}%` }}
-            />
+        {/* Slider with range labels */}
+        <div className="flex-1 flex items-center gap-2">
+          <span className="text-[9px] font-mono text-text-muted w-12 text-right flex-shrink-0">
+            {formatLabel(fromHoursAgo)}
+          </span>
 
-            {/* Left handle */}
-            <div
-              onMouseDown={startDrag("left")}
-              className="absolute w-3.5 h-3.5 bg-bullish rounded-sm -top-[4px] cursor-ew-resize border border-bullish/80 hover:scale-110 transition-transform z-10"
-              style={{ left: `calc(${sliderLeft}% - 7px)` }}
-            />
+          <div ref={trackRef} className="flex-1 relative h-5 flex items-center">
+            <div className="w-full h-1.5 bg-border/50 rounded-full relative">
+              {/* Tick marks */}
+              {[0, 20, 40, 60, 80, 100].map((pct) => (
+                <div
+                  key={pct}
+                  className="absolute top-[-3px] w-px h-[12px] bg-neutral/20"
+                  style={{ left: `${pct}%` }}
+                />
+              ))}
 
-            {/* Right handle */}
-            <div
-              onMouseDown={startDrag("right")}
-              className="absolute w-3.5 h-3.5 bg-bullish rounded-sm -top-[4px] cursor-ew-resize border border-bullish/80 hover:scale-110 transition-transform z-10"
-              style={{ left: `calc(${sliderRight}% - 7px)` }}
-            />
+              {/* Active range */}
+              <div
+                className="absolute h-1.5 bg-bullish/60 rounded-full"
+                style={{ left: `${sliderLeft}%`, right: `${100 - sliderRight}%` }}
+              />
+
+              {/* Left handle */}
+              <div
+                onMouseDown={startDrag("left")}
+                className="absolute w-3 h-4 bg-bullish rounded-sm -top-[5px] cursor-ew-resize border border-bullish/80 hover:scale-110 transition-transform z-10"
+                style={{ left: `calc(${sliderLeft}% - 6px)` }}
+              />
+
+              {/* Right handle */}
+              <div
+                onMouseDown={startDrag("right")}
+                className="absolute w-3 h-4 bg-bullish rounded-sm -top-[5px] cursor-ew-resize border border-bullish/80 hover:scale-110 transition-transform z-10"
+                style={{ left: `calc(${sliderRight}% - 6px)` }}
+              />
+            </div>
           </div>
+
+          <span className="text-[9px] font-mono text-text-muted w-12 flex-shrink-0">
+            {formatLabel(toHoursAgo)}
+          </span>
         </div>
       </div>
 
-      {/* Bottom row: time markers aligned under slider */}
+      {/* Time markers below slider */}
       <div className="flex items-center gap-4 mt-0.5">
-        {/* Spacer matching the presets width */}
         <div className="flex-shrink-0" style={{ width: "clamp(180px, 22%, 280px)" }} />
-
-        {/* Time markers */}
-        <div className="flex-1 flex justify-between px-1">
+        <div className="flex-1 flex justify-between px-3 ml-12 mr-12">
           {markers.map((m, i) => (
-            <span key={i} className="text-[9px] font-mono text-text-muted/60">
+            <span key={i} className="text-[8px] font-mono text-text-muted/50">
               {m}
             </span>
           ))}
