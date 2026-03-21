@@ -142,15 +142,19 @@ def _track_entity_from_doc(doc: dict):
     """Track entity mentions from a document (called under _lock)."""
     source = doc.get("source", "unknown")
     title = doc.get("title", "")
+    content = doc.get("content_text", "")
     quality_score = (doc.get("quality_signals") or {}).get("score") or 0
     engagement = (doc.get("quality_signals") or {}).get("engagement_count") or 0
 
     entities_to_track = []
+    entity_types = {}  # Track entity_type for clean labelling
     for ent in doc.get("entities", []):
         ent_text = ent.get("text", "")
+        ent_type = ent.get("entity_type", "")
         # Skip short, numeric-only, or common noise entities
         if ent_text and len(ent_text) > 1 and not ent_text.isdigit():
             entities_to_track.append(ent_text)
+            entity_types[ent_text] = ent_type
 
     entity_id = doc.get("entity_id")
     # Skip numeric entity IDs (HN parent story IDs) — prefer named entities
@@ -161,7 +165,7 @@ def _track_entity_from_doc(doc: dict):
         if eid not in entity_mentions:
             entity_mentions[eid] = {
                 "id": eid,
-                "label": eid,
+                "label": eid,  # Label stays as entity name, never overwritten by title
                 "volume": 0,
                 "sentiment_sum": 0.0,
                 "sentiment_count": 0,
@@ -169,6 +173,7 @@ def _track_entity_from_doc(doc: dict):
                 "keywords": [],
                 "sample_docs": [],
                 "last_seen": None,
+                "entity_type": entity_types.get(eid, ""),
             }
         em = entity_mentions[eid]
         em["volume"] += 1
@@ -189,20 +194,21 @@ def _track_entity_from_doc(doc: dict):
             em["sentiment_sum"] += norm
             em["sentiment_count"] += 1
 
-        if title and (em["label"] == eid or em["label"].isdigit()):
-            em["label"] = title[:60]
-
+        # Extract keywords from titles (never use title as entity label)
         if title and len(em["keywords"]) < 8:
             words = [w for w in title.split() if len(w) > 3][:3]
             em["keywords"] = list(set(em["keywords"] + words))[:8]
 
-        if len(em["sample_docs"]) < 5:
+        # Collect sample documents (up to 10 for richer context)
+        if len(em["sample_docs"]) < 10:
             em["sample_docs"].append({
-                "title": title[:120] if title else doc.get("content_text", "")[:120],
+                "title": title[:120] if title else "",
+                "content": content[:300] if content else "",
                 "source": source,
                 "url": doc.get("url"),
                 "created_at": doc.get("created_at"),
                 "score": quality_score,
+                "headline": (title or content)[:150],
             })
 
 
@@ -252,18 +258,36 @@ def _consume_signals():
                     pipeline_stats["total_correlated"] += 1
 
                     # Add to signal feed
+                    source_breakdown = data.get("source_breakdown", {})
+                    entity_text = data.get("entity_text", "")
+
                     signal_entry = {
                         "id": data.get("signal_id", ""),
                         "type": _classify_signal_type(data),
-                        "ticker": data.get("entity_text", ""),
+                        "ticker": entity_text,
                         "headline": _build_headline(data),
-                        "source": ", ".join(data.get("source_breakdown", {}).keys()),
+                        "source": ", ".join(source_breakdown.keys()),
                         "timestamp": data.get("created_at", datetime.now(timezone.utc).isoformat()),
                         "confidence": data.get("confidence_score", 0),
+                        # Pass through for AI analysis context
+                        "sources": {
+                            src: info.get("mention_count", info) if isinstance(info, dict) else info
+                            for src, info in source_breakdown.items()
+                        },
+                        "volume": data.get("total_mentions", 0),
+                        "signal_type": data.get("signal_type", ""),
+                        "keywords": data.get("entity_aliases", [])[:5],
                     }
                     # Skip signals with numeric-only entity names
                     if signal_entry["ticker"].isdigit():
                         continue
+
+                    # Enrich with sampleDocs from entity_mentions if available
+                    em_data = entity_mentions.get(entity_text) or entity_mentions.get(entity_text.upper())
+                    if em_data:
+                        signal_entry["sampleDocs"] = em_data.get("sample_docs", [])[:5]
+                    else:
+                        signal_entry["sampleDocs"] = []
 
                     # Deduplicate by entity+headline
                     dedup_key = f"{signal_entry['ticker']}:{signal_entry['headline']}"
@@ -413,8 +437,9 @@ def get_sectors(
             "priceChange24h": round((sentiment - 0.5) * 10, 1),  # Derive from sentiment
             "keywords": e["keywords"][:5],
             "sources": sources_dict,
-            "sampleDocs": e.get("sample_docs", []),
+            "sampleDocs": e.get("sample_docs", [])[:5],
             "uniqueSources": len(source_list),
+            "entity_type": e.get("entity_type", ""),
         })
 
     return result
@@ -525,11 +550,17 @@ async def analyze_entity(request: dict):
     context_type = request.get("context_type", "entity")  # "entity", "signal", "sector"
 
     # Build context for Claude
-    source_list = ", ".join(f"{k} ({v} mentions)" for k, v in sources.items()) if sources else "unknown"
-    sample_texts = "\n".join(
-        f"- [{d.get('source', '?')}] {d.get('title', d.get('headline', ''))}"
-        for d in (sample_docs or [])[:5]
-    )
+    source_list = ", ".join(f"{k} ({v} mentions)" for k, v in sources.items()) if sources else "no source data"
+    sample_texts = ""
+    for d in (sample_docs or [])[:5]:
+        title = d.get("title") or d.get("headline") or ""
+        content = d.get("content", "")
+        src = d.get("source", "?")
+        line = f"- [{src}] {title}"
+        if content and content != title:
+            line += f"\n  {content[:200]}"
+        sample_texts += line + "\n"
+    sample_texts = sample_texts.strip() or "No sample content available."
 
     sentiment_label = "bullish" if sentiment > 0.6 else "bearish" if sentiment < 0.4 else "neutral"
 

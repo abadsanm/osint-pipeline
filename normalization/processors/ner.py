@@ -104,6 +104,10 @@ class EntityExtractor(BaseProcessor):
             if not ent_text or len(ent_text) < 2:
                 continue
 
+            # Skip overly long entity text (likely sentence fragments, not entities)
+            if len(ent_text) > 60:
+                continue
+
             # Check if an ORG entity might be a ticker
             if ent.label_ == "ORG" and ent_text.upper() not in seen_texts:
                 upper = ent_text.upper()
@@ -123,6 +127,14 @@ class EntityExtractor(BaseProcessor):
             if ent_text.upper() in seen_texts:
                 continue
             seen_texts.add(ent_text.upper())
+
+            # Clean entity text: strip trailing punctuation and possessives
+            ent_text = ent_text.rstrip(".,;:!?'\"")
+            if ent_text.endswith("'s"):
+                ent_text = ent_text[:-2]
+            ent_text = ent_text.strip()
+            if not ent_text or len(ent_text) < 2:
+                continue
 
             entities.append(EntityMention(
                 text=ent_text,

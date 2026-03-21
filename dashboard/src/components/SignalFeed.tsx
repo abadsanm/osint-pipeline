@@ -13,6 +13,11 @@ interface Signal {
   source: string;
   timestamp: string;
   confidence: number;
+  sources?: Record<string, number>;
+  volume?: number;
+  signal_type?: string;
+  keywords?: string[];
+  sampleDocs?: any[];
 }
 
 interface SignalFeedProps {
@@ -149,8 +154,11 @@ export default function SignalFeed({ signals }: SignalFeedProps) {
             id: analysisTarget.ticker,
             label: analysisTarget.ticker,
             sentiment: analysisTarget.confidence || 0.5,
-            volume: 0,
-            signal_type: analysisTarget.type,
+            volume: analysisTarget.volume || 0,
+            sources: analysisTarget.sources,
+            keywords: analysisTarget.keywords,
+            sampleDocs: analysisTarget.sampleDocs,
+            signal_type: analysisTarget.signal_type || analysisTarget.type,
             confidence: analysisTarget.confidence,
             headline: analysisTarget.headline,
           }}
