@@ -38,6 +38,9 @@ class CorrelationConfig:
         "amazon": 0.5,
         "twitter_x": 0.3,
         "bluesky": 0.3,
+        "fred": 0.95,
+        "openinsider": 0.9,
+        "producthunt": 0.7,
     }
 
     # Confidence scoring weights

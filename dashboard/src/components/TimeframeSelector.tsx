@@ -76,7 +76,7 @@ export default function TimeframeSelector({
   const [sliderLeft, setSliderLeft] = useState(0);
   const [sliderRight, setSliderRight] = useState(100);
   const trackRef = useRef<HTMLDivElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     if (controlledActive) setActive(controlledActive);

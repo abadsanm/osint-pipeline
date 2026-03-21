@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Header from "@/components/Header";
+import SourceTicker from "@/components/SourceTicker";
 import {
   BarChart,
   Bar,
@@ -27,6 +28,7 @@ export default function InnovationPage() {
   return (
     <div className="flex flex-col h-screen">
       <Header title="Product Innovation" />
+      <SourceTicker />
 
       <div className="flex-1 p-module-gap-lg overflow-auto">
         {/* Channel slicer */}

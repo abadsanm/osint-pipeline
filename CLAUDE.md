@@ -80,6 +80,11 @@ Source Connectors → Raw Kafka Topics → Normalization (fastText/spaCy/SimHash
   - `sec_insider.py` — EDGAR EFTS search + ownership XML parsing (Forms 3/4/5), Finnhub congressional trades
   - `reddit.py` — OAuth API + JSON fallback, financial subreddits
   - `google_trends.py` — pytrends: interest over time, trending searches, related queries
+  - `financial_news.py` — Finnhub market news + Yahoo Finance RSS + Alpha Vantage news sentiment
+  - `unusual_whales.py` — Congressional trades + options flow from Unusual Whales
+  - `fred.py` — FRED API: 13 macro series (GDP, CPI, unemployment, fed funds, treasuries, etc.) + release calendar
+  - `openinsider.py` — OpenInsider scraper: insider buying/selling, cluster buys (BeautifulSoup)
+  - `producthunt.py` — ProductHunt launches + comments via GraphQL API or web scrape fallback
 
 - **`normalization/`** — NLP pipeline (sync Kafka Consumer, CPU-bound)
   - `processors/language.py` — fastText lid.176 language detection
@@ -135,6 +140,11 @@ Source Connectors → Raw Kafka Topics → Normalization (fastText/spaCy/SimHash
 | `osint.correlated.anomalies` | 1 | Coordinated inauthenticity flags |
 | `stock.alpha.signals` | 3 | Scored stock alpha signals |
 | `product.ideation.gaps` | 3 | Product opportunity reports |
+| `finance.news.articles` | 3 | Finnhub + Yahoo Finance + Alpha Vantage news |
+| `finance.options.flow` | 3 | Unusual Whales options flow alerts |
+| `finance.macro.fred` | 3 | FRED macro economic data series |
+| `finance.insider.trades` | 3 | OpenInsider insider buying/selling/cluster buys |
+| `tech.producthunt.launches` / `tech.producthunt.comments` | 3/3 | ProductHunt product launches and comments |
 
 ## Conventions
 
@@ -144,7 +154,7 @@ Source Connectors → Raw Kafka Topics → Normalization (fastText/spaCy/SimHash
 - Every subsystem follows the Config class pattern: class-level attributes, `load_config_from_env()` function
 - Connectors are async (aiohttp); normalization, correlation, and value engines are sync (CPU-bound)
 - Cross-correlation confidence scores must accompany all signals — never act on single-source signals
-- Source reliability weights: SEC (1.0) > News/Trends (0.8) > GitHub (0.7) > TrustPilot (0.6) > HN (0.5) > Reddit (0.4)
+- Source reliability weights: FRED (0.95) > SEC/OpenInsider (0.9-1.0) > News/Trends (0.8) > ProductHunt/GitHub (0.7) > TrustPilot (0.6) > HN (0.5) > Reddit (0.4)
 - Dashboard: Tailwind-only styling, all chart components accept data as props, D3 logic in custom hooks
 - No sentiment model guarantees profitable trades — these are research tools for informational edges
 
@@ -185,6 +195,14 @@ Source Connectors → Raw Kafka Topics → Normalization (fastText/spaCy/SimHash
 | `SPACY_MODEL` | normalization | Override spaCy model (default: en_core_web_lg) |
 | `FASTTEXT_MODEL_PATH` | normalization | Path to lid.176.bin |
 | `FINBERT_MODEL` | stock_alpha | Override FinBERT model (default: ProsusAI/finbert) |
+| `FINNHUB_API_KEY` | financial_news | Enables Finnhub market news (also used by sec_insider) |
+| `ALPHA_VANTAGE_KEY` | financial_news | Enables Alpha Vantage news sentiment |
+| `NEWS_WATCHLIST` | financial_news | Override default ticker watchlist |
+| `UNUSUAL_WHALES_API_KEY` | unusual_whales | Enables premium Unusual Whales endpoints |
+| `FRED_API_KEY` | fred | **Required** — free key from fred.stlouisfed.org |
+| `FRED_SERIES` | fred | Override default 13 macro series (comma-separated) |
+| `PRODUCTHUNT_TOKEN` | producthunt | Enables GraphQL API mode (otherwise scrapes) |
+| `OPENINSIDER_POLL_INTERVAL` | openinsider | Override poll interval (default: 900s) |
 
 ## Known Issues
 

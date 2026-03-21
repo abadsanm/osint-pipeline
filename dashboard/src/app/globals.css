@@ -31,3 +31,17 @@
     @apply bg-surface border border-border rounded-card p-card-padding-lg;
   }
 }
+
+/* Source ticker scrolling animation */
+@keyframes source-ticker-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.source-ticker-track {
+  animation: source-ticker-scroll 40s linear infinite;
+}
+
+.source-ticker-track:hover {
+  animation-play-state: paused;
+}

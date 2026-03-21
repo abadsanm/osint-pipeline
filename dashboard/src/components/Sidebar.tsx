@@ -12,7 +12,7 @@ const navItems = [
 ];
 
 export default function Sidebar() {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? "/";
 
   return (
     <nav className="fixed left-0 top-0 z-40 h-screen w-12 bg-surface border-r border-border flex flex-col items-center py-3 gap-1">

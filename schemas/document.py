@@ -26,7 +26,10 @@ class SourcePlatform(str, Enum):
     TWITTER_X = "twitter_x"
     BLUESKY = "bluesky"
     SEC_EDGAR = "sec_edgar"
+    OPENINSIDER = "openinsider"
     NEWS = "news"
+    FRED = "fred"
+    PRODUCTHUNT = "producthunt"
 
 
 class ContentType(str, Enum):
@@ -38,6 +41,8 @@ class ContentType(str, Enum):
     REPOSITORY = "repository" # GitHub repo metadata
     FILING = "filing"         # SEC filing
     ARTICLE = "article"       # News article
+    METRIC = "metric"         # Economic/financial metric data point
+    POST = "post"             # ProductHunt launch, generic post
 
 
 class QualitySignals(BaseModel):

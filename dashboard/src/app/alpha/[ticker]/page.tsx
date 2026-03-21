@@ -3,6 +3,7 @@
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import Header from "@/components/Header";
+import SourceTicker from "@/components/SourceTicker";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -58,6 +59,7 @@ export default function FinancialAlphaPage() {
   return (
     <div className="flex flex-col h-screen">
       <Header title="Financial Alpha" />
+      <SourceTicker />
 
       <div className="flex-1 p-module-gap-lg overflow-auto">
         {/* Ticker header */}

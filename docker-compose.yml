@@ -154,6 +154,30 @@ services:
         --topic product.ideation.gaps --partitions 3 --replication-factor 1 \
         --config retention.ms=2592000000
 
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic finance.news.articles --partitions 3 --replication-factor 1 \
+        --config retention.ms=604800000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic finance.options.flow --partitions 3 --replication-factor 1 \
+        --config retention.ms=2592000000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic finance.macro.fred --partitions 3 --replication-factor 1 \
+        --config retention.ms=2592000000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic tech.producthunt.launches --partitions 3 --replication-factor 1 \
+        --config retention.ms=604800000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic tech.producthunt.comments --partitions 3 --replication-factor 1 \
+        --config retention.ms=604800000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic finance.insider.trades --partitions 3 --replication-factor 1 \
+        --config retention.ms=2592000000
+
       echo 'All topics created.'
       kafka-topics --bootstrap-server kafka:29092 --list
       "

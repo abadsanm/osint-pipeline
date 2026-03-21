@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Header from "@/components/Header";
+import SourceTicker from "@/components/SourceTicker";
 import HeatSphere from "@/components/HeatSphere";
 import SignalFeed from "@/components/SignalFeed";
 import ChartCards from "@/components/ChartCards";
@@ -32,6 +33,7 @@ export default function GlobalPulsePage() {
   return (
     <div className="flex flex-col min-h-screen">
       <Header title="Global Pulse" />
+      <SourceTicker />
 
       <div className="flex-1 p-3 space-y-1 overflow-auto">
         {/* Live stats + reset button */}

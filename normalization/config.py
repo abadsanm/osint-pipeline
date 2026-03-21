@@ -21,6 +21,12 @@ class NormalizationConfig:
         "finance.reddit.posts",
         "finance.reddit.comments",
         "trends.google.interest",
+        "finance.news.articles",
+        "finance.options.flow",
+        "finance.macro.fred",
+        "finance.insider.trades",
+        "tech.producthunt.launches",
+        "tech.producthunt.comments",
     ]
 
     OUTPUT_TOPIC = "osint.normalized"
