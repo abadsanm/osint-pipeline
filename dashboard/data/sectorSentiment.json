@@ -1,0 +1,38 @@
+{
+  "topSectors": [
+    { "name": "Tech", "score": 87 },
+    { "name": "TSLA", "score": 72 },
+    { "name": "NVDA", "score": 58 },
+    { "name": "Economy", "score": 41 },
+    { "name": "Retail", "score": 34 }
+  ],
+  "emergingRisks": [
+    { "name": "Retail", "score": 89 },
+    { "name": "Energy", "score": 76 },
+    { "name": "AMZN", "score": 68 },
+    { "name": "Regulation", "score": 55 },
+    { "name": "Scandal", "score": 48 }
+  ],
+  "economicSentiments": [
+    { "name": "Interest Rates", "score": 65, "direction": "bearish" },
+    { "name": "Employment", "score": 52, "direction": "bullish" },
+    { "name": "Inflation", "score": 48, "direction": "bearish" },
+    { "name": "GDP Growth", "score": 35, "direction": "bullish" },
+    { "name": "Housing", "score": 28, "direction": "bearish" }
+  ],
+  "macroTimeline": [
+    { "date": "2020-01", "sentiment": 68, "sp500": 320 },
+    { "date": "2020-06", "sentiment": 55, "sp500": 310 },
+    { "date": "2021-01", "sentiment": 82, "sp500": 370 },
+    { "date": "2021-06", "sentiment": 90, "sp500": 420 },
+    { "date": "2022-01", "sentiment": 75, "sp500": 450 },
+    { "date": "2022-06", "sentiment": 45, "sp500": 380 },
+    { "date": "2023-01", "sentiment": 60, "sp500": 400 },
+    { "date": "2023-06", "sentiment": 78, "sp500": 440 },
+    { "date": "2024-01", "sentiment": 85, "sp500": 480 },
+    { "date": "2024-06", "sentiment": 72, "sp500": 530 },
+    { "date": "2025-01", "sentiment": 90, "sp500": 570 },
+    { "date": "2025-06", "sentiment": 88, "sp500": 600 },
+    { "date": "2026-01", "sentiment": 95, "sp500": 620 }
+  ]
+}

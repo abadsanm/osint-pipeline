@@ -1,0 +1,30 @@
+{
+  "channel": "Amazon",
+  "product": "Smartphone X",
+  "criticisms": [
+    { "feature": "Battery Life", "volume": 12400, "intensity": 0.91 },
+    { "feature": "Screen Quality", "volume": 8900, "intensity": 0.72 },
+    { "feature": "Price", "volume": 7600, "intensity": 0.68 },
+    { "feature": "Software Bugs", "volume": 5200, "intensity": 0.55 },
+    { "feature": "Durability", "volume": 3800, "intensity": 0.48 }
+  ],
+  "requests": [
+    { "feature": "Longer Battery", "volume": 15200, "intensity": 0.88 },
+    { "feature": "USB-C", "volume": 11300, "intensity": 0.79 },
+    { "feature": "Repairability", "volume": 8400, "intensity": 0.65 },
+    { "feature": "AI Features", "volume": 6100, "intensity": 0.58 },
+    { "feature": "Modular Design", "volume": 4200, "intensity": 0.45 }
+  ],
+  "gapMap": [
+    { "feature": "Battery", "satisfaction": 0.3, "importance": 0.95, "volume": 12400 },
+    { "feature": "USB-C", "satisfaction": 0.2, "importance": 0.85, "volume": 11300 },
+    { "feature": "Screen", "satisfaction": 0.45, "importance": 0.8, "volume": 8900 },
+    { "feature": "Camera", "satisfaction": 0.85, "importance": 0.8, "volume": 5600 },
+    { "feature": "Software", "satisfaction": 0.4, "importance": 0.7, "volume": 5200 },
+    { "feature": "Design", "satisfaction": 0.75, "importance": 0.65, "volume": 4800 },
+    { "feature": "Price", "satisfaction": 0.35, "importance": 0.9, "volume": 7600 },
+    { "feature": "Speakers", "satisfaction": 0.6, "importance": 0.5, "volume": 3200 },
+    { "feature": "Repairability", "satisfaction": 0.15, "importance": 0.75, "volume": 8400 },
+    { "feature": "AI Features", "satisfaction": 0.5, "importance": 0.6, "volume": 6100 }
+  ]
+}

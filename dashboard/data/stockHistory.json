@@ -1,0 +1,52 @@
+{
+  "ticker": "TSLA",
+  "company": "Tesla Inc.",
+  "currentPrice": 248.52,
+  "change24h": 4.2,
+  "sentimentScore": 0.92,
+  "candles": [
+    { "date": "2026-03-01", "open": 220, "high": 225, "low": 218, "close": 222, "volume": 10000000 },
+    { "date": "2026-03-02", "open": 222, "high": 228, "low": 220, "close": 226, "volume": 11000000 },
+    { "date": "2026-03-03", "open": 226, "high": 230, "low": 224, "close": 228, "volume": 9500000 },
+    { "date": "2026-03-04", "open": 228, "high": 232, "low": 225, "close": 225, "volume": 12000000 },
+    { "date": "2026-03-05", "open": 225, "high": 233, "low": 224, "close": 232, "volume": 13000000 },
+    { "date": "2026-03-06", "open": 232, "high": 238, "low": 230, "close": 236, "volume": 11500000 },
+    { "date": "2026-03-07", "open": 236, "high": 240, "low": 234, "close": 238, "volume": 10500000 },
+    { "date": "2026-03-10", "open": 238, "high": 242, "low": 235, "close": 240, "volume": 14000000 },
+    { "date": "2026-03-11", "open": 240, "high": 245, "low": 238, "close": 243, "volume": 12500000 },
+    { "date": "2026-03-12", "open": 243, "high": 248, "low": 241, "close": 245, "volume": 11000000 },
+    { "date": "2026-03-13", "open": 245, "high": 250, "low": 242, "close": 247, "volume": 13500000 },
+    { "date": "2026-03-14", "open": 247, "high": 252, "low": 245, "close": 250, "volume": 15000000 },
+    { "date": "2026-03-17", "open": 250, "high": 255, "low": 248, "close": 253, "volume": 14500000 },
+    { "date": "2026-03-18", "open": 253, "high": 256, "low": 250, "close": 252, "volume": 12000000 },
+    { "date": "2026-03-19", "open": 252, "high": 258, "low": 250, "close": 248.52, "volume": 16000000 }
+  ],
+  "sentimentTimeline": [
+    { "date": "2026-03-01", "score": 0.65 },
+    { "date": "2026-03-02", "score": 0.68 },
+    { "date": "2026-03-03", "score": 0.70 },
+    { "date": "2026-03-04", "score": 0.62 },
+    { "date": "2026-03-05", "score": 0.75 },
+    { "date": "2026-03-06", "score": 0.78 },
+    { "date": "2026-03-07", "score": 0.80 },
+    { "date": "2026-03-10", "score": 0.82 },
+    { "date": "2026-03-11", "score": 0.85 },
+    { "date": "2026-03-12", "score": 0.83 },
+    { "date": "2026-03-13", "score": 0.88 },
+    { "date": "2026-03-14", "score": 0.90 },
+    { "date": "2026-03-17", "score": 0.91 },
+    { "date": "2026-03-18", "score": 0.89 },
+    { "date": "2026-03-19", "score": 0.92 }
+  ],
+  "predictions": [
+    { "date": "2026-03-20", "predicted": 252, "confidenceLow": 245, "confidenceHigh": 260 },
+    { "date": "2026-03-21", "predicted": 256, "confidenceLow": 243, "confidenceHigh": 268 },
+    { "date": "2026-03-24", "predicted": 260, "confidenceLow": 240, "confidenceHigh": 278 },
+    { "date": "2026-03-25", "predicted": 263, "confidenceLow": 237, "confidenceHigh": 288 }
+  ],
+  "newsInsights": [
+    { "id": "n1", "headline": "Tesla Q4 earnings beat expectations by 15%", "source": "Reuters", "timestamp": "2026-03-14T09:30:00Z" },
+    { "id": "n2", "headline": "CEO denies supply chain disruption rumors", "source": "Bloomberg", "timestamp": "2026-03-17T14:00:00Z" },
+    { "id": "n3", "headline": "Analyst upgrades TSLA to Strong Buy", "source": "Goldman Sachs", "timestamp": "2026-03-19T08:15:00Z" }
+  ]
+}

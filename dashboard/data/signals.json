@@ -1,0 +1,10 @@
+[
+  { "id": "sig-001", "type": "bearish", "ticker": "NVDA", "headline": "Abnormal volume detected on Reddit (r/GPU).", "source": "Reddit", "timestamp": "2026-03-20T14:32:00Z", "confidence": 0.87 },
+  { "id": "sig-002", "type": "bullish", "ticker": "AAPL", "headline": "+4.2% price correlation on news break.", "source": "Bloomberg", "timestamp": "2026-03-20T14:28:00Z", "confidence": 0.92 },
+  { "id": "sig-003", "type": "volume", "ticker": "TSLA", "headline": "3x volume spike across HN + Reddit.", "source": "Multi-source", "timestamp": "2026-03-20T14:25:00Z", "confidence": 0.78 },
+  { "id": "sig-004", "type": "bearish", "ticker": "AMZN", "headline": "Insider sell-off detected via SEC Form 4.", "source": "SEC EDGAR", "timestamp": "2026-03-20T14:20:00Z", "confidence": 0.95 },
+  { "id": "sig-005", "type": "bullish", "ticker": "BTC", "headline": "ETF inflow surge on institutional buy.", "source": "Finnhub", "timestamp": "2026-03-20T14:15:00Z", "confidence": 0.84 },
+  { "id": "sig-006", "type": "bearish", "ticker": "XOM", "headline": "Negative sentiment spike on OPEC news.", "source": "Google Trends", "timestamp": "2026-03-20T14:10:00Z", "confidence": 0.71 },
+  { "id": "sig-007", "type": "bullish", "ticker": "MSFT", "headline": "Azure growth mentioned in 200+ posts.", "source": "HackerNews", "timestamp": "2026-03-20T14:05:00Z", "confidence": 0.89 },
+  { "id": "sig-008", "type": "volume", "ticker": "META", "headline": "Cross-platform mention surge detected.", "source": "Multi-source", "timestamp": "2026-03-20T14:00:00Z", "confidence": 0.66 }
+]

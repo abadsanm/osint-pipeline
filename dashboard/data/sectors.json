@@ -1,0 +1,12 @@
+[
+  { "id": "TSLA", "label": "TSLA", "sector": "Tech", "sentiment": 0.92, "volume": 45000, "priceChange24h": 4.2, "keywords": ["CEO Scandal", "Supply Chain", "Earnings Beat"] },
+  { "id": "NVDA", "label": "NVDA", "sector": "Tech", "sentiment": 0.78, "volume": 38000, "priceChange24h": 2.1, "keywords": ["AI Chips", "Data Center", "GPU Demand"] },
+  { "id": "AAPL", "label": "AAPL", "sector": "Tech", "sentiment": 0.65, "volume": 32000, "priceChange24h": -0.8, "keywords": ["iPhone", "Services Revenue", "Vision Pro"] },
+  { "id": "MSFT", "label": "MSFT", "sector": "Tech", "sentiment": 0.71, "volume": 28000, "priceChange24h": 1.3, "keywords": ["Azure", "OpenAI", "Cloud Growth"] },
+  { "id": "AMZN", "label": "AMZN", "sector": "Retail", "sentiment": 0.35, "volume": 25000, "priceChange24h": -2.5, "keywords": ["Layoffs", "AWS Slowdown", "Prime"] },
+  { "id": "META", "label": "META", "sector": "Tech", "sentiment": 0.58, "volume": 22000, "priceChange24h": 0.4, "keywords": ["Metaverse", "AI Investment", "Threads"] },
+  { "id": "GOOGL", "label": "GOOGL", "sector": "Tech", "sentiment": 0.62, "volume": 20000, "priceChange24h": 0.7, "keywords": ["Gemini", "Search AI", "Antitrust"] },
+  { "id": "JPM", "label": "JPM", "sector": "Finance", "sentiment": 0.55, "volume": 15000, "priceChange24h": -0.3, "keywords": ["Interest Rates", "Earnings", "Banking Crisis"] },
+  { "id": "XOM", "label": "XOM", "sector": "Energy", "sentiment": 0.42, "volume": 12000, "priceChange24h": -1.8, "keywords": ["Oil Prices", "OPEC", "Transition"] },
+  { "id": "BTC", "label": "BTC", "sector": "Crypto", "sentiment": 0.88, "volume": 55000, "priceChange24h": 5.6, "keywords": ["ETF Inflows", "Halving", "Institutional"] }
+]
