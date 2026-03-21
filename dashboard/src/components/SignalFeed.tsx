@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { MoreHorizontal, Send, ChevronRight, ExternalLink } from "lucide-react";
+import { MoreHorizontal, Send, ChevronRight, ExternalLink, Brain } from "lucide-react";
 import Link from "next/link";
+import AnalysisModal from "./AnalysisModal";
 
 interface Signal {
   id: string;
@@ -47,6 +48,7 @@ function formatTimestamp(ts: string): string {
 export default function SignalFeed({ signals }: SignalFeedProps) {
   const [note, setNote] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [analysisTarget, setAnalysisTarget] = useState<Signal | null>(null);
 
   const toggleExpand = (id: string, index: number) => {
     const key = `${id}-${index}`;
@@ -118,20 +120,44 @@ export default function SignalFeed({ signals }: SignalFeedProps) {
                       </span>
                     )}
                   </div>
-                  {ticker && (
-                    <Link
-                      href={`/alpha/${ticker}`}
-                      className="inline-flex items-center gap-1 mt-1.5 text-[10px] text-accent-blue hover:underline"
+                  <div className="flex items-center gap-3 mt-1.5">
+                    {ticker && (
+                      <Link
+                        href={`/alpha/${ticker}`}
+                        className="inline-flex items-center gap-1 text-[10px] text-accent-blue hover:underline"
+                      >
+                        View Alpha <ExternalLink size={9} />
+                      </Link>
+                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setAnalysisTarget(signal); }}
+                      className="inline-flex items-center gap-1 text-[10px] text-bullish hover:underline"
                     >
-                      View Alpha <ExternalLink size={9} />
-                    </Link>
-                  )}
+                      <Brain size={9} /> AI Analysis
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
           );
         })}
       </div>
+
+      {analysisTarget && (
+        <AnalysisModal
+          entity={{
+            id: analysisTarget.ticker,
+            label: analysisTarget.ticker,
+            sentiment: analysisTarget.confidence || 0.5,
+            volume: 0,
+            signal_type: analysisTarget.type,
+            confidence: analysisTarget.confidence,
+            headline: analysisTarget.headline,
+          }}
+          contextType="signal"
+          onClose={() => setAnalysisTarget(null)}
+        />
+      )}
 
       <div className="mt-1 pt-1 border-t border-border relative">
         <input

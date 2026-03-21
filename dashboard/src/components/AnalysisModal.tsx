@@ -1,0 +1,250 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { X, Loader2, TrendingUp, Lightbulb, ExternalLink, Brain } from "lucide-react";
+import Link from "next/link";
+
+interface AnalysisModalProps {
+  entity: {
+    id: string;
+    label: string;
+    sentiment: number;
+    volume: number;
+    sources?: Record<string, number>;
+    keywords?: string[];
+    sampleDocs?: any[];
+    signal_type?: string;
+    confidence?: number;
+    headline?: string;
+  };
+  contextType?: "entity" | "signal" | "sector";
+  onClose: () => void;
+}
+
+const API_BASE = "http://localhost:8000/api";
+
+export default function AnalysisModal({
+  entity,
+  contextType = "entity",
+  onClose,
+}: AnalysisModalProps) {
+  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [model, setModel] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const fetchAnalysis = async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(`${API_BASE}/analyze`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            entity_id: entity.id,
+            label: entity.label,
+            sentiment: entity.sentiment,
+            volume: entity.volume,
+            sources: entity.sources || {},
+            keywords: entity.keywords || [],
+            sampleDocs: entity.sampleDocs || [],
+            signal_type: entity.signal_type || "",
+            confidence: entity.confidence || 0,
+            context_type: contextType,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setAnalysis(data.analysis);
+          setModel(data.model);
+          if (data.error) setError(data.error);
+        } else {
+          setAnalysis("Analysis unavailable. API returned an error.");
+        }
+      } catch {
+        setAnalysis("Analysis unavailable. Could not reach the API.");
+      }
+      setLoading(false);
+    };
+
+    fetchAnalysis();
+  }, [entity, contextType]);
+
+  const sentimentColor =
+    entity.sentiment > 0.6
+      ? "text-bullish"
+      : entity.sentiment < 0.4
+      ? "text-bearish"
+      : "text-neutral";
+
+  const sentimentLabel =
+    entity.sentiment > 0.6
+      ? "Bullish"
+      : entity.sentiment < 0.4
+      ? "Bearish"
+      : "Neutral";
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-surface border border-border rounded-xl max-w-2xl w-full max-h-[85vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="sticky top-0 bg-surface border-b border-border px-5 py-3 flex items-center justify-between rounded-t-xl">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-accent-blue/20 flex items-center justify-center">
+              <Brain size={16} className="text-accent-blue" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-text-primary">
+                AI Analysis: {entity.label}
+              </h3>
+              <p className="text-[11px] text-text-muted">
+                {model === "rule-based-fallback" ? "Rule-based analysis" : "Powered by Claude"}
+                {error && " (API key not set)"}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-text-muted hover:text-text-primary p-1"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Stats bar */}
+        <div className="px-5 py-2.5 border-b border-border bg-surface-alt/50 flex items-center gap-4 text-xs">
+          <div>
+            <span className="text-text-muted">Sentiment: </span>
+            <span className={`font-mono font-semibold ${sentimentColor}`}>
+              {sentimentLabel} ({Math.round(entity.sentiment * 100)}%)
+            </span>
+          </div>
+          <div>
+            <span className="text-text-muted">Volume: </span>
+            <span className="font-mono text-text-primary">{entity.volume?.toLocaleString()}</span>
+          </div>
+          {entity.confidence !== undefined && entity.confidence > 0 && (
+            <div>
+              <span className="text-text-muted">Confidence: </span>
+              <span className="font-mono text-accent-blue">{Math.round(entity.confidence * 100)}%</span>
+            </div>
+          )}
+          <div>
+            <span className="text-text-muted">Sources: </span>
+            <span className="text-text-primary">
+              {Object.keys(entity.sources || {}).join(", ") || "unknown"}
+            </span>
+          </div>
+        </div>
+
+        {/* Analysis content */}
+        <div className="px-5 py-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 size={24} className="animate-spin text-accent-blue" />
+              <span className="text-sm text-text-muted ml-3">Generating analysis...</span>
+            </div>
+          ) : (
+            <div className="prose-dark">
+              {analysis?.split("\n").map((line, i) => {
+                if (!line.trim()) return <br key={i} />;
+
+                // Render markdown-like headers
+                if (line.startsWith("## ")) {
+                  return (
+                    <h2 key={i} className="text-base font-semibold text-text-primary mt-4 mb-2">
+                      {line.replace("## ", "")}
+                    </h2>
+                  );
+                }
+                if (line.startsWith("### ")) {
+                  return (
+                    <h3 key={i} className="text-sm font-semibold text-text-secondary mt-3 mb-1.5">
+                      {line.replace("### ", "")}
+                    </h3>
+                  );
+                }
+                if (line.startsWith("- **")) {
+                  const parts = line.replace("- **", "").split("**");
+                  return (
+                    <p key={i} className="text-sm text-text-primary ml-3 mb-1 leading-relaxed">
+                      <span className="font-semibold text-accent-blue">{parts[0]}</span>
+                      {parts.slice(1).join("")}
+                    </p>
+                  );
+                }
+                if (line.startsWith("- ")) {
+                  return (
+                    <p key={i} className="text-sm text-text-secondary ml-3 mb-1 leading-relaxed">
+                      • {line.substring(2)}
+                    </p>
+                  );
+                }
+                if (line.startsWith("**") && line.endsWith("**")) {
+                  return (
+                    <p key={i} className="text-sm font-semibold text-text-primary mt-2 mb-1">
+                      {line.replace(/\*\*/g, "")}
+                    </p>
+                  );
+                }
+                if (line.startsWith("*") && line.endsWith("*")) {
+                  return (
+                    <p key={i} className="text-[11px] text-text-muted italic mt-2">
+                      {line.replace(/\*/g, "")}
+                    </p>
+                  );
+                }
+
+                // Bold inline markers
+                const rendered = line.replace(
+                  /\*\*(.+?)\*\*/g,
+                  '<span class="font-semibold text-text-primary">$1</span>'
+                );
+
+                return (
+                  <p
+                    key={i}
+                    className="text-sm text-text-secondary leading-relaxed mb-2"
+                    dangerouslySetInnerHTML={{ __html: rendered }}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Actions footer */}
+        <div className="sticky bottom-0 bg-surface border-t border-border px-5 py-3 flex items-center justify-between rounded-b-xl">
+          <div className="flex items-center gap-2">
+            <Link
+              href={`/alpha/${encodeURIComponent(entity.id)}`}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent-blue/10 text-accent-blue border border-accent-blue/20 rounded-md hover:bg-accent-blue/20 transition-colors"
+            >
+              <TrendingUp size={12} />
+              Financial Alpha
+            </Link>
+            <Link
+              href="/innovation"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-bullish/10 text-bullish border border-bullish/20 rounded-md hover:bg-bullish/20 transition-colors"
+            >
+              <Lightbulb size={12} />
+              Product Ideation
+            </Link>
+          </div>
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

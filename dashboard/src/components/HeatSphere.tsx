@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
-import { MoreHorizontal, X, ExternalLink } from "lucide-react";
+import { MoreHorizontal } from "lucide-react";
+import AnalysisModal from "./AnalysisModal";
 
 interface SampleDoc {
   title: string;
@@ -190,157 +191,13 @@ export default function HeatSphere({ data }: HeatSphereProps) {
         </div>
       )}
 
-      {/* Detail modal */}
+      {/* AI Analysis Modal */}
       {modal && (
-        <div
-          className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-4"
-          onClick={() => setModal(null)}
-        >
-          <div
-            className="bg-surface border border-border rounded-xl max-w-lg w-full max-h-[80vh] overflow-y-auto p-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <h3 className="text-lg font-semibold text-text-primary">
-                  {modal.label}
-                </h3>
-                <p className="text-sm text-text-muted mt-0.5">
-                  Entity: <span className="font-mono text-text-secondary">{modal.id}</span>
-                </p>
-              </div>
-              <button
-                onClick={() => setModal(null)}
-                className="text-text-muted hover:text-text-primary p-1"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Stats */}
-            <div className="grid grid-cols-3 gap-3 mb-4">
-              <div className="bg-surface-alt rounded-lg p-3 text-center">
-                <p className="text-xs text-text-muted">Sentiment</p>
-                <p className={`text-xl font-mono font-semibold ${
-                  modal.sentiment > 0.6 ? "text-bullish" : modal.sentiment < 0.4 ? "text-bearish" : "text-neutral"
-                }`}>
-                  {Math.round(modal.sentiment * 100)}%
-                </p>
-              </div>
-              <div className="bg-surface-alt rounded-lg p-3 text-center">
-                <p className="text-xs text-text-muted">Mentions</p>
-                <p className="text-xl font-mono font-semibold text-text-primary">
-                  {modal.volume.toLocaleString()}
-                </p>
-              </div>
-              <div className="bg-surface-alt rounded-lg p-3 text-center">
-                <p className="text-xs text-text-muted">Sources</p>
-                <p className="text-xl font-mono font-semibold text-accent-blue">
-                  {modal.uniqueSources || Object.keys(modal.sources || {}).length}
-                </p>
-              </div>
-            </div>
-
-            {/* Why this bubble */}
-            <div className="mb-4">
-              <h4 className="text-sm font-semibold text-text-secondary mb-2">
-                Why this entity is highlighted
-              </h4>
-              <p className="text-sm text-text-primary leading-relaxed">
-                <span className="font-mono font-medium">{modal.id}</span> has been mentioned{" "}
-                <span className="text-bullish font-semibold">{modal.volume.toLocaleString()}</span>{" "}
-                times across{" "}
-                <span className="text-accent-blue font-semibold">
-                  {Object.keys(modal.sources || {}).length} platform{Object.keys(modal.sources || {}).length !== 1 ? "s" : ""}
-                </span>{" "}
-                ({Object.keys(modal.sources || {}).join(", ")}).
-                {modal.sentiment > 0.6
-                  ? " Overall sentiment is bullish."
-                  : modal.sentiment < 0.4
-                  ? " Overall sentiment is bearish — potential risk signal."
-                  : " Sentiment is neutral."}
-              </p>
-            </div>
-
-            {/* Source breakdown */}
-            {modal.sources && Object.keys(modal.sources).length > 0 && (
-              <div className="mb-4">
-                <h4 className="text-sm font-semibold text-text-secondary mb-2">
-                  Source Breakdown
-                </h4>
-                <div className="space-y-1.5">
-                  {Object.entries(modal.sources)
-                    .sort(([, a], [, b]) => (b as number) - (a as number))
-                    .map(([source, count]) => (
-                      <div key={source} className="flex items-center gap-2">
-                        <span className="text-xs text-text-muted w-24">{source}</span>
-                        <div className="flex-1 h-2 bg-surface-alt rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-accent-blue rounded-full"
-                            style={{ width: `${Math.min(100, ((count as number) / modal.volume) * 100)}%` }}
-                          />
-                        </div>
-                        <span className="text-xs font-mono text-text-secondary w-10 text-right">
-                          {(count as number).toLocaleString()}
-                        </span>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            )}
-
-            {/* Keywords */}
-            {modal.keywords.length > 0 && (
-              <div className="mb-4">
-                <h4 className="text-sm font-semibold text-text-secondary mb-2">Keywords</h4>
-                <div className="flex flex-wrap gap-1.5">
-                  {modal.keywords.map((kw, i) => (
-                    <span key={i} className="px-2 py-0.5 bg-surface-alt text-xs text-text-secondary rounded-md">
-                      {kw}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Sample sources */}
-            {modal.sampleDocs && modal.sampleDocs.length > 0 && (
-              <div>
-                <h4 className="text-sm font-semibold text-text-secondary mb-2">
-                  Source Documents
-                </h4>
-                <div className="space-y-2">
-                  {modal.sampleDocs.map((doc, i) => (
-                    <div key={i} className="bg-surface-alt rounded-lg p-3 border border-border">
-                      <p className="text-sm text-text-primary leading-snug">
-                        {doc.title}
-                      </p>
-                      <div className="flex items-center gap-2 mt-1.5">
-                        <span className="text-xs text-text-muted">{doc.source}</span>
-                        {doc.score > 0 && (
-                          <span className="text-xs font-mono text-text-muted">
-                            score: {doc.score}
-                          </span>
-                        )}
-                        {doc.url && (
-                          <a
-                            href={doc.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-accent-blue hover:underline flex items-center gap-0.5 ml-auto"
-                          >
-                            Open <ExternalLink size={10} />
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        <AnalysisModal
+          entity={modal}
+          contextType="entity"
+          onClose={() => setModal(null)}
+        />
       )}
     </div>
   );

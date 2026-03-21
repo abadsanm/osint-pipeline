@@ -494,6 +494,147 @@ def search_entities(
 
 
 # ---------------------------------------------------------------------------
+# AI Analysis Endpoint
+# ---------------------------------------------------------------------------
+
+@app.post("/api/analyze")
+async def analyze_entity(request: dict):
+    """Generate AI-powered analysis for an entity using Claude."""
+    entity_id = request.get("entity_id", "")
+    entity_label = request.get("label", entity_id)
+    sentiment = request.get("sentiment", 0.5)
+    volume = request.get("volume", 0)
+    sources = request.get("sources", {})
+    keywords = request.get("keywords", [])
+    sample_docs = request.get("sampleDocs", [])
+    signal_type = request.get("signal_type", "")
+    confidence = request.get("confidence", 0)
+    context_type = request.get("context_type", "entity")  # "entity", "signal", "sector"
+
+    # Build context for Claude
+    source_list = ", ".join(f"{k} ({v} mentions)" for k, v in sources.items()) if sources else "unknown"
+    sample_texts = "\n".join(
+        f"- [{d.get('source', '?')}] {d.get('title', d.get('headline', ''))}"
+        for d in (sample_docs or [])[:5]
+    )
+
+    sentiment_label = "bullish" if sentiment > 0.6 else "bearish" if sentiment < 0.4 else "neutral"
+
+    if context_type == "signal":
+        prompt = f"""You are a senior OSINT financial analyst. Analyze this correlated signal:
+
+Entity: {entity_label}
+Signal Type: {signal_type}
+Confidence: {confidence:.0%}
+Sentiment: {sentiment_label} ({sentiment:.0%})
+Volume: {volume} mentions
+Sources: {source_list}
+
+Sample content:
+{sample_texts}
+
+Provide a concise analysis (3-4 paragraphs) covering:
+1. **Why this signal matters** — what is driving this entity's appearance in the pipeline and why it's being flagged
+2. **Sentiment drivers** — what specific factors are pushing the sentiment in this direction based on the source content
+3. **Cross-source validation** — how strong is this signal given the sources it comes from (SEC filings are strongest, Reddit weakest)
+4. **Actionable recommendations** — specific next steps for both stock trading and product strategy perspectives
+
+Be direct, data-driven, and specific. Use the sample content to ground your analysis."""
+    else:
+        prompt = f"""You are a senior OSINT financial analyst. Analyze this entity trending in our pipeline:
+
+Entity: {entity_label} (ID: {entity_id})
+Sentiment: {sentiment_label} ({sentiment:.0%})
+Mention Volume: {volume}
+Sources: {source_list}
+Keywords: {', '.join(keywords) if keywords else 'none extracted'}
+
+Sample content from pipeline:
+{sample_texts}
+
+Provide a concise analysis (3-4 paragraphs) covering:
+1. **Why this entity is trending** — what is driving the mention volume and why the pipeline is capturing it
+2. **Sentiment analysis** — what's pushing the sentiment {sentiment_label} and whether this is likely to continue
+3. **Relevance assessment** — is this a meaningful market signal, noise, or potential coordinated activity
+4. **Actionable recommendations**:
+   - For **Stock Alpha**: any trading implications, risk signals, or opportunities
+   - For **Product Ideation**: any consumer insights, product gaps, or innovation opportunities
+   - Suggested next steps for deeper investigation
+
+Be direct and specific. Reference the actual source content where possible."""
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic()  # Uses ANTHROPIC_API_KEY env var
+
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        analysis_text = message.content[0].text
+
+        return {
+            "entity_id": entity_id,
+            "label": entity_label,
+            "analysis": analysis_text,
+            "model": "claude-sonnet-4-20250514",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except ImportError:
+        return {
+            "entity_id": entity_id,
+            "label": entity_label,
+            "analysis": _generate_fallback_analysis(
+                entity_label, sentiment, sentiment_label, volume, source_list, keywords, sample_texts, context_type
+            ),
+            "model": "rule-based-fallback",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        log.warning("AI analysis failed: %s", e)
+        return {
+            "entity_id": entity_id,
+            "label": entity_label,
+            "analysis": _generate_fallback_analysis(
+                entity_label, sentiment, sentiment_label, volume, source_list, keywords, sample_texts, context_type
+            ),
+            "model": "rule-based-fallback",
+            "error": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+def _generate_fallback_analysis(
+    label, sentiment, sentiment_label, volume, source_list, keywords, sample_texts, context_type
+):
+    """Generate a rule-based analysis when Claude is unavailable."""
+    strength = "strong" if volume > 50 else "moderate" if volume > 10 else "weak"
+    kw_text = ", ".join(keywords[:3]) if keywords else "general discussion"
+
+    return f"""## Analysis: {label}
+
+**Signal Strength:** {strength.title()} ({volume} mentions)
+**Sentiment:** {sentiment_label.title()} ({sentiment:.0%})
+**Sources:** {source_list}
+
+### Why This Is Trending
+{label} has accumulated {volume} mentions across {source_list}. The primary discussion themes include {kw_text}. This represents a {strength} signal in our pipeline.
+
+### Sentiment Assessment
+Current sentiment is {sentiment_label} at {sentiment:.0%}. {"This suggests positive market perception and potential upward momentum." if sentiment > 0.6 else "This suggests negative market perception — monitor for potential downside risk." if sentiment < 0.4 else "Sentiment is neutral — the market is undecided on direction."}
+
+### Recommendations
+- **Stock Alpha:** {"Consider monitoring for entry points if supported by technical indicators." if sentiment > 0.6 else "Exercise caution — negative sentiment may precede price decline." if sentiment < 0.4 else "Wait for sentiment to establish a clear direction before acting."}
+- **Product Ideation:** Review the source content for consumer pain points and feature requests related to {label}.
+- **Next Steps:** Cross-reference with SEC filings and earnings data for stronger signal validation.
+
+*Note: AI-powered analysis unavailable. Set ANTHROPIC_API_KEY for Claude-generated insights.*"""
+
+
+# ---------------------------------------------------------------------------
 # Startup
 # ---------------------------------------------------------------------------
 
