@@ -40,7 +40,7 @@ class BinanceConfig:
     TRADES_TOPIC = "market.binance.trades"
 
     # Binance WebSocket
-    WS_BASE = "wss://stream.binance.com:9443/stream"
+    WS_BASE = "wss://stream.binance.us:9443/stream"
     SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
 
     # Reconnection
@@ -104,7 +104,7 @@ def build_stream_url(symbols: list[str]) -> str:
     streams = []
     for sym in symbols:
         lower = sym.lower()
-        streams.append(f"{lower}@depth@100ms")
+        streams.append(f"{lower}@depth20@100ms")
         streams.append(f"{lower}@aggTrade")
     stream_param = "/".join(streams)
     return f"{BinanceConfig.WS_BASE}?streams={stream_param}"
@@ -127,8 +127,11 @@ def handle_depth_message(stream: str, data: dict, publisher: KafkaPublisher) -> 
     # Extract symbol from stream name: "btcusdt@depth@100ms" -> "BTCUSDT"
     symbol = stream.split("@")[0].upper()
 
-    bids = [[float(price), float(qty)] for price, qty in data.get("bids", [])[:20]]
-    asks = [[float(price), float(qty)] for price, qty in data.get("asks", [])[:20]]
+    # Binance uses "bids"/"asks" for REST and "b"/"a" for WebSocket streams
+    raw_bids = data.get("bids") or data.get("b") or []
+    raw_asks = data.get("asks") or data.get("a") or []
+    bids = [[float(price), float(qty)] for price, qty in raw_bids[:20]]
+    asks = [[float(price), float(qty)] for price, qty in raw_asks[:20]]
 
     message = json.dumps({
         "symbol": symbol,
@@ -202,7 +205,7 @@ class BinanceWebSocketConsumer:
                 delay = BinanceConfig.RECONNECT_DELAY
             except (
                 websockets.ConnectionClosed,
-                websockets.InvalidStatusCode,
+                websockets.exceptions.InvalidStatus,
                 ConnectionError,
                 OSError,
             ) as e:
@@ -254,7 +257,7 @@ class BinanceWebSocketConsumer:
                 if not stream or data is None:
                     continue
 
-                if "@depth@" in stream:
+                if "@depth" in stream and "@aggTrade" not in stream:
                     handle_depth_message(stream, data, self._publisher)
                     self._depth_count += 1
                 elif "@aggTrade" in stream:
