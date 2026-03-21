@@ -532,6 +532,327 @@ def search_entities(
 
 
 # ---------------------------------------------------------------------------
+# Financial Alpha Endpoint
+# ---------------------------------------------------------------------------
+
+# Cache for yfinance data: {ticker: (fetch_time, info_dict, price_df)}
+_yf_cache: dict[str, tuple[float, dict, object]] = {}
+_YF_CACHE_TTL = 300  # 5 minutes
+
+
+def _get_yf_data(ticker: str) -> tuple[dict, object]:
+    """Fetch yfinance Ticker info and price history with 5-minute caching."""
+    import yfinance as yf
+
+    cached = _yf_cache.get(ticker)
+    if cached:
+        fetch_time, info, hist = cached
+        if time.time() - fetch_time < _YF_CACHE_TTL:
+            return info, hist
+
+    t = yf.Ticker(ticker)
+    info = t.info or {}
+    hist = t.history(period="3mo")
+    _yf_cache[ticker] = (time.time(), info, hist)
+    return info, hist
+
+
+@app.get("/api/alpha/{ticker}")
+async def get_alpha(ticker: str):
+    """Comprehensive data for the Financial Alpha dashboard page."""
+    ticker = ticker.upper().strip()
+
+    # --- 1. Fetch price data and metadata via yfinance ---
+    candles = []
+    technicals_snapshot = {}
+    technicals_series = []
+    company = ticker
+    price = None
+    change_pct = None
+    change_amt = None
+    range_52w = {"low": None, "high": None}
+    info = {}
+    hist = None
+
+    try:
+        info, hist = _get_yf_data(ticker)
+
+        company = info.get("longName") or info.get("shortName") or ticker
+        price = info.get("currentPrice") or info.get("regularMarketPrice")
+        prev_close = info.get("previousClose") or info.get("regularMarketPreviousClose")
+        if price is not None and prev_close:
+            change_amt = round(price - prev_close, 2)
+            change_pct = round((change_amt / prev_close) * 100, 2)
+        range_52w = {
+            "low": info.get("fiftyTwoWeekLow"),
+            "high": info.get("fiftyTwoWeekHigh"),
+        }
+
+        if hist is not None and not hist.empty:
+            # Standardize columns
+            import pandas as pd
+            hist.columns = [c.lower().replace(" ", "_") for c in hist.columns]
+
+            # Build candles list
+            for idx, row in hist.iterrows():
+                date_str = idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx)
+                candles.append({
+                    "date": date_str,
+                    "open": round(float(row.get("open", 0)), 2),
+                    "high": round(float(row.get("high", 0)), 2),
+                    "low": round(float(row.get("low", 0)), 2),
+                    "close": round(float(row.get("close", 0)), 2),
+                    "volume": int(row.get("volume", 0)),
+                })
+
+            # Fall back to last close if currentPrice unavailable
+            if price is None and len(candles) > 0:
+                price = candles[-1]["close"]
+
+    except Exception as e:
+        log.warning("yfinance fetch failed for %s: %s", ticker, e)
+
+    # --- 2. Compute technical indicators ---
+    try:
+        if hist is not None and not hist.empty:
+            from stock_alpha.technicals import compute_technicals
+            import pandas as pd
+            import numpy as np
+
+            tech_df = compute_technicals(hist)
+            latest = tech_df.iloc[-1]
+
+            def _safe(val):
+                if val is None:
+                    return None
+                try:
+                    if pd.isna(val):
+                        return None
+                except (TypeError, ValueError):
+                    return None
+                return round(float(val), 4)
+
+            sma20 = _safe(latest.get("sma_20"))
+            sma50 = _safe(latest.get("sma_50"))
+            close = _safe(latest.get("close"))
+
+            # Determine trend
+            trend = "neutral"
+            if close is not None and sma20 is not None and sma50 is not None:
+                if close > sma20 > sma50:
+                    trend = "bullish"
+                elif close < sma20 < sma50:
+                    trend = "bearish"
+
+            technicals_snapshot = {
+                "rsi": _safe(latest.get("rsi")),
+                "macd": {
+                    "value": _safe(latest.get("macd")),
+                    "signal": _safe(latest.get("macd_signal")),
+                    "histogram": _safe(latest.get("macd_hist")),
+                },
+                "bb": {
+                    "pctb": _safe(latest.get("bb_pctb")),
+                    "upper": _safe(latest.get("bb_upper")),
+                    "lower": _safe(latest.get("bb_lower")),
+                    "middle": _safe(latest.get("bb_mid")),
+                },
+                "sma20": sma20,
+                "sma50": sma50,
+                "ema12": _safe(latest.get("ema_12")),
+                "ema26": _safe(latest.get("ema_26")),
+                "atr": _safe(latest.get("atr")),
+                "obv": _safe(latest.get("obv")),
+                "trend": trend,
+            }
+
+            # Build technicals_series (last 60 rows)
+            series_df = tech_df.tail(60).copy()
+            series_df = series_df.replace({np.nan: None})
+            for idx, row in series_df.iterrows():
+                date_str = idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx)
+                technicals_series.append({
+                    "date": date_str,
+                    "close": _safe(row.get("close")),
+                    "rsi": _safe(row.get("rsi")),
+                    "macd": _safe(row.get("macd")),
+                    "macd_signal": _safe(row.get("macd_signal")),
+                    "macd_hist": _safe(row.get("macd_hist")),
+                    "bb_upper": _safe(row.get("bb_upper")),
+                    "bb_lower": _safe(row.get("bb_lower")),
+                    "bb_mid": _safe(row.get("bb_mid")),
+                    "bb_pctb": _safe(row.get("bb_pctb")),
+                    "sma20": _safe(row.get("sma_20")),
+                    "sma50": _safe(row.get("sma_50")),
+                    "ema12": _safe(row.get("ema_12")),
+                    "ema26": _safe(row.get("ema_26")),
+                    "atr": _safe(row.get("atr")),
+                    "obv": _safe(row.get("obv")),
+                    "volume": _safe(row.get("volume")),
+                })
+
+    except Exception as e:
+        log.warning("Technicals computation failed for %s: %s", ticker, e)
+
+    # --- 3. Sentiment data from entity_mentions cache ---
+    sentiment_data = {
+        "score": None,
+        "label": "neutral",
+        "volume": 0,
+        "sources": {},
+        "keywords": [],
+        "sample_docs": [],
+        "timeline": [],
+    }
+
+    with _lock:
+        # Try various key forms for the ticker
+        em = (
+            entity_mentions.get(ticker)
+            or entity_mentions.get(ticker.upper())
+            or entity_mentions.get("$" + ticker)
+        )
+        if em:
+            vol = em.get("volume", 0)
+            score = None
+            if em.get("sentiment_count", 0) > 0:
+                score = round(em["sentiment_sum"] / em["sentiment_count"], 4)
+            label = "neutral"
+            if score is not None:
+                if score > 0.6:
+                    label = "bullish"
+                elif score < 0.4:
+                    label = "bearish"
+
+            sentiment_data = {
+                "score": score,
+                "label": label,
+                "volume": vol,
+                "sources": dict(em.get("sources", {})),
+                "keywords": em.get("keywords", [])[:8],
+                "sample_docs": em.get("sample_docs", [])[:10],
+                "timeline": [],
+            }
+
+            # Build sentiment timeline from sample_docs timestamps
+            from collections import defaultdict as _dd
+            date_buckets: dict[str, list[float]] = _dd(list)
+            for doc in em.get("sample_docs", []):
+                created = doc.get("created_at") or ""
+                doc_score = doc.get("score")
+                if created and doc_score is not None:
+                    day = created[:10]  # YYYY-MM-DD
+                    import math
+                    norm = 0.3 + 0.6 * min(1.0, math.log1p(doc_score) / math.log1p(1000))
+                    date_buckets[day].append(norm)
+            for day in sorted(date_buckets.keys()):
+                vals = date_buckets[day]
+                sentiment_data["timeline"].append({
+                    "date": day,
+                    "sentiment": round(sum(vals) / len(vals), 4),
+                    "count": len(vals),
+                })
+
+    # --- 4. Signal scorecard from signals deque ---
+    signal_data = None
+    with _lock:
+        for sig in reversed(signals):
+            sig_ticker = (sig.get("ticker") or "").upper()
+            if sig_ticker == ticker:
+                signal_data = {
+                    "confidence": sig.get("confidence"),
+                    "type": sig.get("type"),
+                    "headline": sig.get("headline"),
+                    "sources": list(sig.get("sources", {}).keys()) if isinstance(sig.get("sources"), dict) else [],
+                }
+                break
+
+    # --- 5. Build score breakdown ---
+    score_data = {
+        "overall": None,
+        "direction": "neutral",
+        "sentiment_weight": 0.25,
+        "svc_weight": 0.15,
+        "technical_weight": 0.20,
+        "microstructure_weight": 0.15,
+        "order_flow_weight": 0.15,
+        "correlation_weight": 0.10,
+        "components_available": [],
+    }
+
+    try:
+        components = []
+        raw_parts = {}
+
+        # Sentiment component
+        if sentiment_data["score"] is not None:
+            components.append("sentiment")
+            # Map 0-1 sentiment to -1..+1
+            raw_parts["sentiment"] = (sentiment_data["score"] - 0.5) * 2
+
+        # Technical component
+        if technicals_snapshot and technicals_snapshot.get("rsi") is not None:
+            components.append("technical")
+            # Simple tech score from RSI and MACD
+            rsi_val = technicals_snapshot["rsi"]
+            tech_s = 0.0
+            if rsi_val < 30:
+                tech_s += 0.5
+            elif rsi_val > 70:
+                tech_s -= 0.5
+            macd_h = (technicals_snapshot.get("macd") or {}).get("histogram")
+            if macd_h is not None:
+                tech_s += max(-1.0, min(1.0, macd_h * 5))
+            raw_parts["technical"] = max(-1.0, min(1.0, tech_s / 2))
+
+        # Correlation component
+        if signal_data and signal_data.get("confidence") is not None:
+            components.append("correlation")
+            raw_parts["correlation"] = signal_data["confidence"] * 2 - 1
+
+        # Compute weighted overall
+        if raw_parts:
+            base_weights = {
+                "sentiment": 0.25, "svc": 0.15, "technical": 0.20,
+                "microstructure": 0.15, "order_flow": 0.15, "correlation": 0.10,
+            }
+            active_total = sum(base_weights.get(k, 0) for k in raw_parts)
+            if active_total > 0:
+                scale = 1.0 / active_total
+                overall = sum(base_weights.get(k, 0) * scale * v for k, v in raw_parts.items())
+                overall = max(-1.0, min(1.0, overall))
+
+                direction = "neutral"
+                if overall > 0.15:
+                    direction = "bullish"
+                elif overall < -0.15:
+                    direction = "bearish"
+
+                score_data["overall"] = round(overall, 4)
+                score_data["direction"] = direction
+
+        score_data["components_available"] = components
+
+    except Exception as e:
+        log.warning("Score computation failed for %s: %s", ticker, e)
+
+    return {
+        "ticker": ticker,
+        "company": company,
+        "price": price,
+        "change_pct": change_pct,
+        "change_amt": change_amt,
+        "range_52w": range_52w,
+        "candles": candles,
+        "technicals": technicals_snapshot,
+        "technicals_series": technicals_series,
+        "sentiment": sentiment_data,
+        "signal": signal_data,
+        "score": score_data,
+    }
+
+
+# ---------------------------------------------------------------------------
 # AI Analysis Endpoint
 # ---------------------------------------------------------------------------
 
