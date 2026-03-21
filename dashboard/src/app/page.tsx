@@ -37,15 +37,21 @@ export default function GlobalPulsePage() {
           </div>
         </ResizableCard>
 
-        {/* Chart cards — resizable */}
-        <ResizableCard defaultHeight={200} minHeight={120} maxHeight={500}>
-          <ChartCards
-            topSectors={sectorSentiment.topSectors}
-            emergingRisks={sectorSentiment.emergingRisks}
-            economicSentiments={sectorSentiment.economicSentiments as any}
-            macroTimeline={sectorSentiment.macroTimeline}
-          />
-        </ResizableCard>
+        {/* Chart cards — each individually resizable with top handle */}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+          <ResizableCard defaultHeight={200} minHeight={120} maxHeight={500} handlePosition="top">
+            <ChartCards.Macro data={sectorSentiment.macroTimeline} />
+          </ResizableCard>
+          <ResizableCard defaultHeight={200} minHeight={120} maxHeight={500} handlePosition="top">
+            <ChartCards.HBar title="Top 5 Sector Sentiment" data={sectorSentiment.topSectors} color="#00FFC2" />
+          </ResizableCard>
+          <ResizableCard defaultHeight={200} minHeight={120} maxHeight={500} handlePosition="top">
+            <ChartCards.HBar title="Emerging Risks" data={sectorSentiment.emergingRisks} color="#FF4B2B" />
+          </ResizableCard>
+          <ResizableCard defaultHeight={200} minHeight={120} maxHeight={500} handlePosition="top">
+            <ChartCards.Economic data={sectorSentiment.economicSentiments as any} />
+          </ResizableCard>
+        </div>
 
         {/* Timeframe selector */}
         <TimeframeSelector />

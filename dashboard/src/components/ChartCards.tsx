@@ -25,13 +25,6 @@ interface TimelineData {
   sp500: number;
 }
 
-interface ChartCardsProps {
-  topSectors: BarData[];
-  emergingRisks: BarData[];
-  economicSentiments: BarData[];
-  macroTimeline: TimelineData[];
-}
-
 function HorizontalBarCard({
   title,
   data,
@@ -43,7 +36,7 @@ function HorizontalBarCard({
 }) {
   return (
     <div className="card flex flex-col h-full">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-2">
         <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
           {title}
         </h3>
@@ -85,18 +78,12 @@ function HorizontalBarCard({
   );
 }
 
-function EconomicSentimentCard({
-  title,
-  data,
-}: {
-  title: string;
-  data: BarData[];
-}) {
+function EconomicSentimentCard({ data }: { data: BarData[] }) {
   return (
     <div className="card flex flex-col h-full">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-2">
         <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
-          {title}
+          Economic Sentiments
         </h3>
         <button className="text-text-muted hover:text-text-primary p-0.5"><MoreHorizontal size={14} /></button>
       </div>
@@ -157,18 +144,12 @@ function EconomicSentimentCard({
   );
 }
 
-function MacroSentimentCard({
-  title,
-  data,
-}: {
-  title: string;
-  data: TimelineData[];
-}) {
+function MacroSentimentCard({ data }: { data: TimelineData[] }) {
   return (
     <div className="card flex flex-col h-full">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-2">
         <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
-          {title}
+          Macro Sentiment vs. S&P 500
         </h3>
         <button className="text-text-muted hover:text-text-primary p-0.5"><MoreHorizontal size={14} /></button>
       </div>
@@ -238,32 +219,11 @@ function MacroSentimentCard({
   );
 }
 
-export default function ChartCards({
-  topSectors,
-  emergingRisks,
-  economicSentiments,
-  macroTimeline,
-}: ChartCardsProps) {
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 h-full">
-      <MacroSentimentCard
-        title="Macro Sentiment vs. S&P 500"
-        data={macroTimeline}
-      />
-      <HorizontalBarCard
-        title="Top 5 Sector Sentiment"
-        data={topSectors}
-        color="#00FFC2"
-      />
-      <HorizontalBarCard
-        title="Emerging Risks"
-        data={emergingRisks}
-        color="#FF4B2B"
-      />
-      <EconomicSentimentCard
-        title="Economic Sentiments"
-        data={economicSentiments}
-      />
-    </div>
-  );
-}
+// Named exports for individual use
+const ChartCards = {
+  Macro: MacroSentimentCard,
+  HBar: HorizontalBarCard,
+  Economic: EconomicSentimentCard,
+};
+
+export default ChartCards;

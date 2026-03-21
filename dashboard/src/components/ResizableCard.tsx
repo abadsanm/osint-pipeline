@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
+import { GripHorizontal } from "lucide-react";
 
 interface ResizableCardProps {
   children: React.ReactNode;
   defaultHeight: number;
   minHeight?: number;
   maxHeight?: number;
+  handlePosition?: "top" | "bottom";
 }
 
 export default function ResizableCard({
@@ -14,6 +16,7 @@ export default function ResizableCard({
   defaultHeight,
   minHeight = 100,
   maxHeight = 900,
+  handlePosition = "bottom",
 }: ResizableCardProps) {
   const [height, setHeight] = useState(defaultHeight);
   const dragging = useRef(false);
@@ -24,10 +27,11 @@ export default function ResizableCard({
       dragging.current = true;
       const startY = e.clientY;
       const startH = height;
+      const direction = handlePosition === "top" ? -1 : 1;
 
       const onMove = (ev: MouseEvent) => {
         if (!dragging.current) return;
-        const newH = startH + (ev.clientY - startY);
+        const newH = startH + (ev.clientY - startY) * direction;
         setHeight(Math.max(minHeight, Math.min(maxHeight, newH)));
       };
 
@@ -44,21 +48,23 @@ export default function ResizableCard({
       window.addEventListener("mousemove", onMove);
       window.addEventListener("mouseup", onUp);
     },
-    [height, minHeight, maxHeight]
+    [height, minHeight, maxHeight, handlePosition]
+  );
+
+  const handle = (
+    <div
+      onMouseDown={onDragStart}
+      className="h-3 flex items-center justify-center cursor-row-resize group hover:bg-accent-blue/10 rounded transition-colors"
+    >
+      <GripHorizontal size={14} className="text-border group-hover:text-neutral transition-colors" />
+    </div>
   );
 
   return (
     <div className="relative">
-      <div style={{ height }}>
-        {children}
-      </div>
-      {/* Resize handle at bottom */}
-      <div
-        onMouseDown={onDragStart}
-        className="h-2 flex items-center justify-center cursor-row-resize group hover:bg-surface-alt/30 rounded-b transition-colors -mt-1"
-      >
-        <div className="w-10 h-0.5 bg-border group-hover:bg-neutral rounded-full transition-colors" />
-      </div>
+      {handlePosition === "top" && handle}
+      <div style={{ height }}>{children}</div>
+      {handlePosition === "bottom" && handle}
     </div>
   );
 }
