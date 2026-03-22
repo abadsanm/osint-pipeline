@@ -1464,7 +1464,7 @@ export default function FinancialAlphaPage() {
                 <span className="font-mono text-2xl tracking-tight">{data.ticker}</span>
                 <span className="text-text-secondary font-normal text-base">{data.company}</span>
               </h2>
-              {data.range_52w && (
+              {data.range_52w && data.range_52w.low != null && data.range_52w.high != null && (
                 <p className="text-[11px] text-text-muted font-mono mt-0.5">
                   52W: ${data.range_52w.low.toFixed(2)} — ${data.range_52w.high.toFixed(2)}
                 </p>

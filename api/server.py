@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -269,7 +270,30 @@ def _track_entity_from_doc(doc: dict):
     if entity_id and not entity_id.isdigit() and entity_id not in entities_to_track:
         entities_to_track.append(entity_id)
 
+    # Noise filter — reject entities that aren't useful for financial/product analysis
+    ENTITY_BLOCKLIST = {
+        # Religious/cultural terms
+        "allahu akbar", "inshallah", "mashallah", "alhamdulillah",
+        # Common noise words that slip through NER
+        "show hn", "ask hn", "tell hn", "launch hn",
+        "http", "https", "www", "com", "org",
+        "the", "this", "that", "what", "which",
+        # OS/distro names that match financial keywords
+        "fedora", "fedora linux", "fedora asahiremix", "fedora and",
+        # Legislative noise
+        "bill c-22", "the lawful", "thelawfulaccessact",
+        # Generic terms
+        "update", "version", "release", "download", "install",
+        "comment", "post", "thread", "reply", "deleted",
+    }
+
     for eid in entities_to_track:
+        # Skip entities in the blocklist
+        if eid.lower().strip() in ENTITY_BLOCKLIST:
+            continue
+        # Skip entities shorter than 2 chars or longer than 50 chars
+        if len(eid.strip()) < 2 or len(eid.strip()) > 50:
+            continue
         if eid not in entity_mentions:
             entity_mentions[eid] = {
                 "id": eid,
@@ -1276,15 +1300,76 @@ def get_topics():
         return dict(topic_counts)
 
 
+# Cache for macro chart yfinance data (30-minute TTL)
+_macro_chart_cache: dict = {"data": None, "fetched_at": 0}
+
+
+def _fetch_macro_timeline() -> list[dict]:
+    """Fetch S&P 500, VIX, 10Y Treasury via yfinance for the macro chart."""
+    now = time.time()
+    if _macro_chart_cache["data"] and now - _macro_chart_cache["fetched_at"] < 1800:
+        return _macro_chart_cache["data"]
+
+    try:
+        import yfinance as yf
+
+        # Get 6 months of weekly data
+        spy = yf.download("SPY", period="6mo", interval="1wk", progress=False)
+        vix = yf.download("^VIX", period="6mo", interval="1wk", progress=False)
+        tny = yf.download("^TNX", period="6mo", interval="1wk", progress=False)
+
+        timeline: list[dict] = []
+        for date in spy.index:
+            date_str = date.strftime("%Y-%m-%d")
+            entry: dict = {
+                "date": date_str,
+                "sp500": round(float(spy.loc[date, "Close"]), 1),
+                "sentiment": 50,  # Will be overwritten with actual pipeline sentiment
+            }
+            # Match VIX
+            if date in vix.index:
+                entry["vix"] = round(float(vix.loc[date, "Close"]), 1)
+            # Match 10Y yield
+            if date in tny.index:
+                entry["treasury10y"] = round(float(tny.loc[date, "Close"]), 2)
+            timeline.append(entry)
+
+        _macro_chart_cache["data"] = timeline
+        _macro_chart_cache["fetched_at"] = now
+        return timeline
+    except Exception as e:
+        log.warning("Failed to fetch macro timeline: %s", e)
+        return []
+
+
 @app.get("/api/pulse/charts")
 def get_pulse_charts(
     since: Optional[str] = Query(None, description="ISO timestamp or preset: 1D,5D,1M,YTD,1Y,5Y"),
 ):
     """Chart card datasets for the Global Pulse page, built from live entity_mentions."""
-    _ECONOMIC_KEYWORDS = {
-        "interest rate", "employment", "inflation", "gdp", "housing",
-        "fed", "treasury", "cpi", "jobs", "unemployment",
-        "federal reserve", "rate hike", "rate cut", "monetary policy",
+    ECONOMIC_KEYWORDS = {
+        "interest rate": "Interest Rates",
+        "federal reserve": "Fed Policy",
+        "fed funds": "Fed Policy",
+        "employment": "Employment",
+        "unemployment": "Employment",
+        "jobs report": "Employment",
+        "inflation": "Inflation",
+        "cpi": "Inflation",
+        "gdp": "GDP Growth",
+        "gross domestic": "GDP Growth",
+        "housing": "Housing",
+        "mortgage": "Housing",
+        "treasury": "Treasury",
+        "yield curve": "Treasury",
+        "recession": "Recession Risk",
+        "consumer spending": "Consumer",
+        "retail sales": "Consumer",
+    }
+    # Pre-compile word-boundary patterns for strict matching
+    _ECONOMIC_PATTERNS = {
+        keyword: (re.compile(r'\b' + re.escape(keyword) + r'\b', re.IGNORECASE), category)
+        for keyword, category in ECONOMIC_KEYWORDS.items()
     }
 
     cutoff = _parse_since(since)
@@ -1344,60 +1429,81 @@ def get_pulse_charts(
             "sources": dict(e["sources"]) if isinstance(e["sources"], dict) else {},
         })
 
-    # --- economicSentiments: entities matching economic keywords ---
-    economic_sentiments = []
+    # --- economicSentiments: entities matching economic keywords (word-boundary) ---
+    # Aggregate by canonical category so "CPI" and "inflation" both map to "Inflation"
+    _econ_category_agg: dict[str, dict] = {}  # category -> {volume, sent_sum, sent_count, sources}
     for e in entities:
-        label_lower = e["label"].lower()
-        if any(kw in label_lower for kw in _ECONOMIC_KEYWORDS):
-            if e["_tf_sent_count"] > 0:
-                avg = e["_tf_sent_sum"] / e["_tf_sent_count"]
-            else:
-                avg = 0.5
-            direction = "bullish" if avg > 0.5 else "bearish"
-            economic_sentiments.append({
-                "name": e["label"],
-                "score": round(avg * 100),
-                "direction": direction,
-                "volume": e["_tf_volume"],
-                "sources": dict(e["sources"]) if isinstance(e["sources"], dict) else {},
-            })
+        label = e["label"]
+        matched_category = None
+        for _kw, (pattern, category) in _ECONOMIC_PATTERNS.items():
+            if pattern.search(label):
+                matched_category = category
+                break
+        if not matched_category:
+            continue
+        if matched_category not in _econ_category_agg:
+            _econ_category_agg[matched_category] = {
+                "volume": 0, "sent_sum": 0.0, "sent_count": 0, "sources": defaultdict(int),
+            }
+        agg = _econ_category_agg[matched_category]
+        agg["volume"] += e["_tf_volume"]
+        agg["sent_sum"] += e["_tf_sent_sum"]
+        agg["sent_count"] += e["_tf_sent_count"]
+        src_dict = e.get("sources", {})
+        if isinstance(src_dict, dict):
+            for sk, sv in src_dict.items():
+                agg["sources"][sk] += sv
+
+    economic_sentiments = []
+    for category, agg in _econ_category_agg.items():
+        if agg["sent_count"] > 0:
+            avg = agg["sent_sum"] / agg["sent_count"]
+        else:
+            avg = 0.5
+        direction = "bullish" if avg > 0.5 else "bearish"
+        economic_sentiments.append({
+            "name": category,
+            "score": round(avg * 100),
+            "direction": direction,
+            "volume": agg["volume"],
+            "sources": dict(agg["sources"]),
+        })
     # Sort by volume descending, take top 5
     economic_sentiments.sort(key=lambda x: x.get("volume", 0), reverse=True)
     economic_sentiments = economic_sentiments[:5]
 
-    # --- macroTimeline: build from recent_docs if available ---
-    macro_timeline: list[dict] = []
-    with _lock:
-        # Try finance.macro.fred or any finance topic with date data
-        fred_docs = list(recent_docs.get("finance.macro.fred", []))
+    # --- macroTimeline: yfinance live data + pipeline sentiment overlay ---
+    macro_timeline = _fetch_macro_timeline()
 
-    if fred_docs:
-        # Group by date and compute daily averages
-        from collections import defaultdict as _dd
-        daily: dict[str, list[float]] = _dd(list)
-        for doc in fred_docs:
-            ts = doc.get("created_at") or doc.get("ingested_at") or ""
-            if ts:
-                # Skip docs outside the timeframe cutoff
-                if cutoff and ts < cutoff:
-                    continue
-                day = ts[:10]  # YYYY-MM-DD
-                score = doc.get("quality_signals", {}).get("score", 0)
-                if score:
-                    import math
-                    sentiment = 0.3 + 0.6 * min(1.0, math.log1p(score) / math.log1p(1000))
-                    daily[day].append(sentiment)
+    # Overlay pipeline sentiment from entity_mentions sample_docs
+    if macro_timeline:
+        import math as _math
+        # Build a map of week -> [sentiment_values] from all entity sample_docs
+        _week_sentiments: dict[str, list[float]] = defaultdict(list)
+        for e in entities:
+            for doc in e.get("sample_docs", []):
+                doc_ts = doc.get("created_at") or ""
+                doc_score = doc.get("score")
+                if doc_ts and doc_score is not None and doc_score > 0:
+                    doc_day = doc_ts[:10]  # YYYY-MM-DD
+                    norm = 0.3 + 0.6 * min(1.0, _math.log1p(doc_score) / _math.log1p(1000))
+                    _week_sentiments[doc_day].append(norm)
 
-        for day in sorted(daily.keys())[-30:]:
-            vals = daily[day]
-            avg_sent = sum(vals) / len(vals) if vals else 0.5
-            macro_timeline.append({
-                "date": day,
-                "sentiment": round(avg_sent * 100),
-                "sp500": 0,
-                "vix": 0,
-                "treasury10y": 0,
-            })
+        # For each timeline entry, find sentiment values in the surrounding week
+        for entry in macro_timeline:
+            entry_date = entry["date"]  # YYYY-MM-DD
+            # Collect sentiments from this date +/- 3 days
+            from datetime import timedelta as _td
+            try:
+                center = datetime.strptime(entry_date, "%Y-%m-%d")
+                week_vals: list[float] = []
+                for delta in range(-3, 4):
+                    check_day = (center + _td(days=delta)).strftime("%Y-%m-%d")
+                    week_vals.extend(_week_sentiments.get(check_day, []))
+                if week_vals:
+                    entry["sentiment"] = round((sum(week_vals) / len(week_vals)) * 100)
+            except Exception:
+                pass  # Keep the default sentiment=50
 
     return {
         "topSectors": top_sectors,
