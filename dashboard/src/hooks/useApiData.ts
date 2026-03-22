@@ -58,3 +58,37 @@ export function useSectors(limit = 30, timeframe?: string) {
 export function useTopics() {
   return useApiData("/topics", {} as Record<string, number>, 5000);
 }
+
+export interface PulseChartBarData {
+  name: string;
+  score: number;
+  direction?: "bullish" | "bearish";
+  volume?: number;
+  sources?: Record<string, number>;
+}
+
+export interface PulseChartTimeline {
+  date: string;
+  sentiment: number;
+  sp500: number;
+  vix?: number;
+  treasury10y?: number;
+}
+
+export interface PulseChartsData {
+  topSectors: PulseChartBarData[];
+  emergingRisks: PulseChartBarData[];
+  economicSentiments: PulseChartBarData[];
+  macroTimeline: PulseChartTimeline[];
+}
+
+const EMPTY_PULSE_CHARTS: PulseChartsData = {
+  topSectors: [],
+  emergingRisks: [],
+  economicSentiments: [],
+  macroTimeline: [],
+};
+
+export function usePulseCharts() {
+  return useApiData<PulseChartsData>("/pulse/charts", EMPTY_PULSE_CHARTS, 10000);
+}

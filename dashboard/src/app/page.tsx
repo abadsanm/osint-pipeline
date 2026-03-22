@@ -9,7 +9,7 @@ import ChartCards from "@/components/ChartCards";
 import TimeframeSelector from "@/components/TimeframeSelector";
 import LiveStats from "@/components/LiveStats";
 import ResizableCard from "@/components/ResizableCard";
-import { useSignals, useSectors, useStats } from "@/hooks/useApiData";
+import { useSignals, useSectors, useStats, usePulseCharts } from "@/hooks/useApiData";
 import { RotateCcw } from "lucide-react";
 
 import sectorsData from "../../data/sectors.json";
@@ -26,9 +26,16 @@ export default function GlobalPulsePage() {
   const stats = useStats();
   const liveSignals = useSignals(20, activeFilter);
   const liveSectors = useSectors(30, activeFilter);
+  const pulseCharts = usePulseCharts();
 
   const displaySignals = liveSignals.length > 0 ? liveSignals : signalsData;
   const displaySectors = liveSectors.length > 0 ? liveSectors : sectorsData;
+
+  // Use live chart data when available, fall back to mock sectorSentiment
+  const chartMacro = pulseCharts.macroTimeline.length > 0 ? pulseCharts.macroTimeline : sectorSentiment.macroTimeline;
+  const chartTopSectors = pulseCharts.topSectors.length > 0 ? pulseCharts.topSectors : sectorSentiment.topSectors;
+  const chartRisks = pulseCharts.emergingRisks.length > 0 ? pulseCharts.emergingRisks : sectorSentiment.emergingRisks;
+  const chartEconomic = pulseCharts.economicSentiments.length > 0 ? pulseCharts.economicSentiments : sectorSentiment.economicSentiments;
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -62,16 +69,16 @@ export default function GlobalPulsePage() {
         {/* Chart cards — each individually resizable */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
           <ResizableCard defaultHeight={200} minHeight={120} maxHeight={500} handlePosition="top" resetKey={resetKey}>
-            <ChartCards.Macro data={sectorSentiment.macroTimeline} />
+            <ChartCards.Macro data={chartMacro} />
           </ResizableCard>
           <ResizableCard defaultHeight={200} minHeight={120} maxHeight={500} handlePosition="top" resetKey={resetKey}>
-            <ChartCards.HBar title="Top 5 Sector Sentiment" data={sectorSentiment.topSectors} color="#00FFC2" />
+            <ChartCards.HBar title="Top 5 Sector Sentiment" data={chartTopSectors} color="#00FFC2" />
           </ResizableCard>
           <ResizableCard defaultHeight={200} minHeight={120} maxHeight={500} handlePosition="top" resetKey={resetKey}>
-            <ChartCards.HBar title="Emerging Risks" data={sectorSentiment.emergingRisks} color="#FF4B2B" />
+            <ChartCards.HBar title="Emerging Risks" data={chartRisks} color="#FF4B2B" />
           </ResizableCard>
           <ResizableCard defaultHeight={200} minHeight={120} maxHeight={500} handlePosition="top" resetKey={resetKey}>
-            <ChartCards.Economic data={sectorSentiment.economicSentiments as any} />
+            <ChartCards.Economic data={chartEconomic as any} />
           </ResizableCard>
         </div>
 

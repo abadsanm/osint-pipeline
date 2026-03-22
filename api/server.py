@@ -1060,6 +1060,116 @@ def get_topics():
         return dict(topic_counts)
 
 
+@app.get("/api/pulse/charts")
+def get_pulse_charts():
+    """Chart card datasets for the Global Pulse page, built from live entity_mentions."""
+    _ECONOMIC_KEYWORDS = {
+        "interest rate", "employment", "inflation", "gdp", "housing",
+        "fed", "treasury", "cpi", "jobs", "unemployment",
+        "federal reserve", "rate hike", "rate cut", "monetary policy",
+    }
+
+    with _lock:
+        # Snapshot entity_mentions for processing
+        entities = list(entity_mentions.values())
+
+    # --- topSectors: highest sentiment entities with enough data ---
+    top_candidates = [
+        e for e in entities
+        if e.get("volume", 0) >= 5 and e.get("sentiment_count", 0) > 0
+    ]
+    top_candidates.sort(
+        key=lambda e: e["sentiment_sum"] / e["sentiment_count"],
+        reverse=True,
+    )
+    top_sectors = []
+    for e in top_candidates[:5]:
+        avg = e["sentiment_sum"] / e["sentiment_count"]
+        top_sectors.append({
+            "name": e["label"],
+            "score": round(avg * 100),
+            "volume": e["volume"],
+            "sources": dict(e["sources"]) if isinstance(e["sources"], dict) else {},
+        })
+
+    # --- emergingRisks: negative sentiment, high volume ---
+    risk_candidates = [
+        e for e in entities
+        if e.get("volume", 0) >= 5
+        and e.get("sentiment_count", 0) > 0
+        and (e["sentiment_sum"] / e["sentiment_count"]) < 0.45
+    ]
+    risk_candidates.sort(key=lambda e: e["volume"], reverse=True)
+    emerging_risks = []
+    for e in risk_candidates[:5]:
+        avg = e["sentiment_sum"] / e["sentiment_count"]
+        emerging_risks.append({
+            "name": e["label"],
+            "score": round((1.0 - avg) * 100),
+            "volume": e["volume"],
+            "sources": dict(e["sources"]) if isinstance(e["sources"], dict) else {},
+        })
+
+    # --- economicSentiments: entities matching economic keywords ---
+    economic_sentiments = []
+    for e in entities:
+        label_lower = e["label"].lower()
+        if any(kw in label_lower for kw in _ECONOMIC_KEYWORDS):
+            if e.get("sentiment_count", 0) > 0:
+                avg = e["sentiment_sum"] / e["sentiment_count"]
+            else:
+                avg = 0.5
+            direction = "bullish" if avg > 0.5 else "bearish"
+            economic_sentiments.append({
+                "name": e["label"],
+                "score": round(avg * 100),
+                "direction": direction,
+                "volume": e["volume"],
+                "sources": dict(e["sources"]) if isinstance(e["sources"], dict) else {},
+            })
+    # Sort by volume descending, take top 5
+    economic_sentiments.sort(key=lambda x: x.get("volume", 0), reverse=True)
+    economic_sentiments = economic_sentiments[:5]
+
+    # --- macroTimeline: build from recent_docs if available ---
+    macro_timeline: list[dict] = []
+    with _lock:
+        # Try finance.macro.fred or any finance topic with date data
+        fred_docs = list(recent_docs.get("finance.macro.fred", []))
+
+    if fred_docs:
+        # Group by date and compute daily averages
+        from collections import defaultdict as _dd
+        daily: dict[str, list[float]] = _dd(list)
+        for doc in fred_docs:
+            ts = doc.get("created_at") or doc.get("ingested_at") or ""
+            if ts:
+                day = ts[:10]  # YYYY-MM-DD
+                score = doc.get("quality_signals", {}).get("score", 0)
+                if score:
+                    import math
+                    sentiment = 0.3 + 0.6 * min(1.0, math.log1p(score) / math.log1p(1000))
+                    daily[day].append(sentiment)
+
+        for day in sorted(daily.keys())[-30:]:
+            vals = daily[day]
+            avg_sent = sum(vals) / len(vals) if vals else 0.5
+            macro_timeline.append({
+                "date": day,
+                "sentiment": round(avg_sent * 100),
+                "sp500": 0,
+                "vix": 0,
+                "treasury10y": 0,
+            })
+
+    return {
+        "topSectors": top_sectors,
+        "emergingRisks": emerging_risks,
+        "economicSentiments": economic_sentiments,
+        "macroTimeline": macro_timeline,
+    }
+
+
 @app.get("/api/search")
 def search_entities(
     q: str = Query("", min_length=1, max_length=200, description="Search query"),

@@ -21,6 +21,8 @@ interface BarData {
   score: number;
   direction?: "bullish" | "bearish";
   description?: string;
+  volume?: number;
+  sources?: Record<string, number>;
 }
 
 interface TimelineData {
@@ -166,19 +168,23 @@ function HorizontalBarCard({
         onClose={() => setPopup((p) => ({ ...p, visible: false }))}
         onAnalyze={() => { setAnalysisTarget(popup.name); setPopup((p) => ({ ...p, visible: false })); }}
       />
-      {analysisTarget && (
-        <AnalysisModal
-          entity={{
-            id: analysisTarget,
-            label: analysisTarget,
-            sentiment: (data.find((d) => d.name === analysisTarget)?.score || 50) / 100,
-            volume: 0,
-            keywords: [analysisTarget, title],
-          }}
-          contextType="sector"
-          onClose={() => setAnalysisTarget(null)}
-        />
-      )}
+      {analysisTarget && (() => {
+        const match = data.find((d) => d.name === analysisTarget);
+        return (
+          <AnalysisModal
+            entity={{
+              id: analysisTarget,
+              label: analysisTarget,
+              sentiment: (match?.score || 50) / 100,
+              volume: match?.volume || 0,
+              keywords: [analysisTarget, title, ...Object.keys(match?.sources || {})],
+              sources: match?.sources,
+            }}
+            contextType="sector"
+            onClose={() => setAnalysisTarget(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -237,19 +243,23 @@ function EconomicSentimentCard({ data }: { data: BarData[] }) {
         onClose={() => setPopup((p) => ({ ...p, visible: false }))}
         onAnalyze={() => { setAnalysisTarget(popup.name); setPopup((p) => ({ ...p, visible: false })); }}
       />
-      {analysisTarget && (
-        <AnalysisModal
-          entity={{
-            id: analysisTarget,
-            label: analysisTarget,
-            sentiment: (data.find((d) => d.name === analysisTarget)?.score || 50) / 100,
-            volume: 0,
-            keywords: [analysisTarget, "Economic Sentiment"],
-          }}
-          contextType="sector"
-          onClose={() => setAnalysisTarget(null)}
-        />
-      )}
+      {analysisTarget && (() => {
+        const match = data.find((d) => d.name === analysisTarget);
+        return (
+          <AnalysisModal
+            entity={{
+              id: analysisTarget,
+              label: analysisTarget,
+              sentiment: (match?.score || 50) / 100,
+              volume: match?.volume || 0,
+              keywords: [analysisTarget, "Economic Sentiment", ...Object.keys(match?.sources || {})],
+              sources: match?.sources,
+            }}
+            contextType="sector"
+            onClose={() => setAnalysisTarget(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
