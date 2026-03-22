@@ -2061,13 +2061,45 @@ async def get_alpha(ticker: str):
         "timeline": [],
     }
 
+    # Common ticker → company name aliases
+    _TICKER_ALIASES = {
+        "AAPL": ["APPLE", "Apple Inc", "Apple"],
+        "TSLA": ["TESLA", "Tesla Inc", "Tesla"],
+        "NVDA": ["NVIDIA", "Nvidia Corp", "Nvidia"],
+        "MSFT": ["MICROSOFT", "Microsoft Corp", "Microsoft"],
+        "AMZN": ["AMAZON", "Amazon.com", "Amazon"],
+        "GOOGL": ["GOOGLE", "Alphabet", "Google"],
+        "META": ["META PLATFORMS", "Facebook", "Meta"],
+        "JPM": ["JP MORGAN", "JPMorgan", "JPMorgan Chase"],
+        "XOM": ["EXXON", "Exxon Mobil", "ExxonMobil"],
+        "BTC": ["BITCOIN", "Bitcoin", "BTC-USD"],
+        "ETH": ["ETHEREUM", "Ethereum", "ETH-USD"],
+    }
+
     with _lock:
-        # Try various key forms for the ticker
+        # Try various key forms for the ticker + aliases
         em = (
             entity_mentions.get(ticker)
             or entity_mentions.get(ticker.upper())
             or entity_mentions.get("$" + ticker)
         )
+        # Try aliases — merge all matching entity_mentions
+        if not em or em.get("volume", 0) < 5:
+            aliases = _TICKER_ALIASES.get(ticker.upper(), [])
+            best = em
+            best_vol = em.get("volume", 0) if em else 0
+            for alias in aliases:
+                candidate = entity_mentions.get(alias) or entity_mentions.get(alias.upper())
+                if candidate and candidate.get("volume", 0) > best_vol:
+                    best = candidate
+                    best_vol = candidate.get("volume", 0)
+            # Also fuzzy search — any entity containing the ticker
+            if best_vol < 10:
+                for eid, edata in entity_mentions.items():
+                    if ticker.upper() in eid.upper() and edata.get("volume", 0) > best_vol:
+                        best = edata
+                        best_vol = edata.get("volume", 0)
+            em = best
         if em:
             vol = em.get("volume", 0)
             score = None
