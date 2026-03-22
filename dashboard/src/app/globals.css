@@ -45,3 +45,16 @@
 .source-ticker-track:hover {
   animation-play-state: paused;
 }
+
+@keyframes watchlist-ticker-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.watchlist-ticker-track {
+  animation: watchlist-ticker-scroll 30s linear infinite;
+}
+
+.watchlist-ticker-track:hover {
+  animation-play-state: paused;
+}

@@ -127,13 +127,14 @@ const SCORE_COMPONENTS: {
   label: string;
   color: string;
   bg: string;
+  description: string;
 }[] = [
-  { key: "sentiment", weightKey: "sentiment_weight", label: "Sentiment", color: "#58A6FF", bg: "bg-accent-blue" },
-  { key: "svc", weightKey: "svc_weight", label: "SVC", color: "#A78BFA", bg: "bg-[#A78BFA]" },
-  { key: "technical", weightKey: "technical_weight", label: "Technicals", color: "#22D3EE", bg: "bg-[#22D3EE]" },
-  { key: "microstructure", weightKey: "microstructure_weight", label: "Microstructure", color: "#FBBF24", bg: "bg-[#FBBF24]" },
-  { key: "order_flow", weightKey: "order_flow_weight", label: "Order Flow", color: "#00FFC2", bg: "bg-bullish" },
-  { key: "correlation", weightKey: "correlation_weight", label: "Correlation", color: "#F472B6", bg: "bg-[#F472B6]" },
+  { key: "sentiment", weightKey: "sentiment_weight", label: "Sentiment", color: "#58A6FF", bg: "bg-accent-blue", description: "FinBERT NLP analysis of pipeline content from HN, Reddit, SEC filings, and news. Measures aggregate market sentiment toward this ticker. Positive = bullish consensus, negative = bearish." },
+  { key: "svc", weightKey: "svc_weight", label: "SVC", color: "#A78BFA", bg: "bg-[#A78BFA]", description: "Sentiment Volume Convergence \u2014 measures whether sentiment shift is confirmed by volume change. High SVC = sentiment moving with conviction. Calculated as sentiment_shift \u00D7 volume_change." },
+  { key: "technical", weightKey: "technical_weight", label: "Technicals", color: "#22D3EE", bg: "bg-[#22D3EE]", description: "RSI, MACD histogram, Bollinger Band %B, and SMA20 trend combined into a single directional score. Captures momentum, overbought/oversold conditions, and trend direction." },
+  { key: "microstructure", weightKey: "microstructure_weight", label: "Microstructure", color: "#FBBF24", bg: "bg-[#FBBF24]", description: "Price position relative to VWAP (using SMA20 as proxy), Bollinger Band position, and ATR volatility. Reveals institutional positioning and support/resistance levels." },
+  { key: "order_flow", weightKey: "order_flow_weight", label: "Order Flow", color: "#00FFC2", bg: "bg-bullish", description: "Volume-price correlation analysis. Rising price + rising volume = bullish conviction. Falling price + rising volume = selling pressure. Detects smart money accumulation/distribution." },
+  { key: "correlation", weightKey: "correlation_weight", label: "Correlation", color: "#F472B6", bg: "bg-[#F472B6]", description: "Cross-source signal agreement from the correlation engine. Higher confidence = more independent sources (HN + Reddit + SEC + News) agree on the direction. Single-source signals are discounted." },
 ];
 
 const SOURCE_COLORS: Record<string, string> = {
@@ -488,7 +489,9 @@ function BollingerCard({ bb }: { bb: AlphaData["technicals"]["bb"] }) {
 // Signal Scorecard
 // ---------------------------------------------------------------------------
 
-function SignalScorecard({ score }: { score: AlphaData["score"] }) {
+function SignalScorecard({ score, ticker }: { score: AlphaData["score"]; ticker: string }) {
+  const [componentModal, setComponentModal] = useState<typeof SCORE_COMPONENTS[number] | null>(null);
+
   const totalWeight =
     score.sentiment_weight +
     score.svc_weight +
@@ -538,14 +541,16 @@ function SignalScorecard({ score }: { score: AlphaData["score"] }) {
               if (pct === 0) return null;
               const available = score.components_available.includes(comp.key);
               return (
-                <div
+                <button
                   key={comp.key}
-                  className="relative group"
+                  onClick={() => available && setComponentModal(comp)}
+                  className={`relative group ${available ? "cursor-pointer hover:brightness-110" : "cursor-default"}`}
                   style={{
                     width: `${pct}%`,
                     backgroundColor: available ? comp.color : "#21262D",
                     opacity: available ? 1 : 0.35,
                   }}
+                  title={available ? `Click to analyze ${comp.label}` : `${comp.label} (unavailable)`}
                 >
                   {/* Tooltip on hover */}
                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-10">
@@ -553,7 +558,7 @@ function SignalScorecard({ score }: { score: AlphaData["score"] }) {
                       {comp.label}: {(weight * 100).toFixed(0)}%
                     </div>
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -565,29 +570,54 @@ function SignalScorecard({ score }: { score: AlphaData["score"] }) {
               const available = score.components_available.includes(comp.key);
               return (
                 <div key={comp.key} className="flex items-center gap-1.5">
-                  <span
-                    className="w-2 h-2 rounded-full flex-shrink-0"
-                    style={{
-                      backgroundColor: available ? comp.color : "#21262D",
-                      opacity: available ? 1 : 0.4,
-                    }}
-                  />
-                  <span
-                    className={`text-[11px] ${available ? "text-text-secondary" : "text-text-muted line-through"}`}
+                  <button
+                    onClick={() => available && setComponentModal(comp)}
+                    className={`flex items-center gap-1.5 ${available ? "cursor-pointer hover:opacity-80" : "cursor-default"}`}
                   >
-                    {comp.label}
-                  </span>
-                  <span
-                    className={`font-mono text-[11px] ${available ? "text-text-primary" : "text-text-muted"}`}
-                  >
-                    {available ? `${(weight * 100).toFixed(0)}%` : "N/A"}
-                  </span>
+                    <span
+                      className="w-2 h-2 rounded-full flex-shrink-0"
+                      style={{
+                        backgroundColor: available ? comp.color : "#21262D",
+                        opacity: available ? 1 : 0.4,
+                      }}
+                    />
+                    <span
+                      className={`text-[11px] ${available ? "text-text-secondary" : "text-text-muted line-through"}`}
+                    >
+                      {comp.label}
+                    </span>
+                    <span
+                      className={`font-mono text-[11px] ${available ? "text-text-primary" : "text-text-muted"}`}
+                    >
+                      {available ? `${(weight * 100).toFixed(0)}%` : "N/A"}
+                    </span>
+                  </button>
+                  <InfoTooltip title={`${comp.label} (${(weight * 100).toFixed(0)}%)`}>
+                    <p>{comp.description}</p>
+                  </InfoTooltip>
                 </div>
               );
             })}
           </div>
         </div>
       </div>
+
+      {/* Component analysis modal */}
+      {componentModal && (
+        <AnalysisModal
+          entity={{
+            id: ticker,
+            label: `${ticker} - ${componentModal.label} Analysis`,
+            sentiment: score.direction === "bullish" ? 0.8 : score.direction === "bearish" ? 0.2 : 0.5,
+            volume: 0,
+            signal_type: componentModal.key,
+            confidence: (score[componentModal.weightKey] as number) || 0,
+            headline: `${componentModal.label} component for ${ticker}: ${componentModal.description}`,
+          }}
+          contextType="signal"
+          onClose={() => setComponentModal(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1695,7 +1725,7 @@ export default function FinancialAlphaPage() {
         {/* ================================================================
             4. Signal Scorecard
             ================================================================ */}
-        {data.score && <div className="mb-module-gap-lg"><SignalScorecard score={data.score} /></div>}
+        {data.score && <div className="mb-module-gap-lg"><SignalScorecard score={data.score} ticker={ticker} /></div>}
 
         {/* ================================================================
             4b. Volume Profile + Volume & OBV Analysis

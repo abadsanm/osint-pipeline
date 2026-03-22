@@ -7,6 +7,7 @@ import ChatPanel from "./ChatPanel";
 import NotesPanel from "./NotesPanel";
 import ResearchPanel from "./ResearchPanel";
 import AnalysisModal from "./AnalysisModal";
+import WatchlistTicker from "./WatchlistTicker";
 
 interface HeaderProps {
   title: string;
@@ -325,17 +326,20 @@ export default function Header({ title }: HeaderProps) {
 
       {/* Page header */}
       <header className="flex items-center justify-between px-5 py-2.5 border-b border-border bg-surface">
-        <div className="flex items-center gap-4">
-          <h1 className="text-base font-semibold tracking-tight">
+        <div className="flex items-center gap-4 flex-1 min-w-0">
+          <h1 className="text-base font-semibold tracking-tight flex-shrink-0">
             <span className="text-bullish">SENTINEL</span>
             <span className="text-neutral mx-1.5">|</span>
             <span className="text-text-primary">{title}</span>
           </h1>
-          <div className="flex items-center gap-1.5 bg-surface-alt px-2.5 py-1 rounded-md">
+          <div className="flex items-center gap-1.5 bg-surface-alt px-2.5 py-1 rounded-md flex-shrink-0">
             <span className="w-1.5 h-1.5 rounded-full bg-bullish animate-pulse" />
             <span className="text-xs text-text-muted">Live</span>
             <span className="text-xs font-mono text-bullish ml-0.5" suppressHydrationWarning>{time}</span>
           </div>
+
+          {/* Watchlist ticker tape */}
+          <WatchlistTicker />
         </div>
 
         {/* Search with dropdown */}
