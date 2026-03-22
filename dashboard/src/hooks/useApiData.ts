@@ -89,6 +89,10 @@ const EMPTY_PULSE_CHARTS: PulseChartsData = {
   macroTimeline: [],
 };
 
-export function usePulseCharts() {
-  return useApiData<PulseChartsData>("/pulse/charts", EMPTY_PULSE_CHARTS, 10000);
+export function usePulseCharts(timeframe?: string) {
+  const params = new URLSearchParams();
+  if (timeframe) params.set("since", timeframe);
+  const qs = params.toString();
+  const endpoint = qs ? `/pulse/charts?${qs}` : "/pulse/charts";
+  return useApiData<PulseChartsData>(endpoint, EMPTY_PULSE_CHARTS, 10000);
 }

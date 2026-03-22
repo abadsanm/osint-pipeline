@@ -11,14 +11,13 @@ Two ingestion modes (selected by configuration):
      No auth needed but stricter rate limits and IP ban risk.
      Self-imposed 3s delay between requests.
 
-Target subreddits (financial OSINT, ordered by value):
-  - r/wallstreetbets  — retail momentum, meme stocks, flair filtering (DD/YOLO)
-  - r/stocks          — mid-cap fundamentals, best signal-to-noise
-  - r/options         — unusual options interest detection
-  - r/investing       — macro sentiment baseline
-  - r/SecurityAnalysis — low volume, high-quality deep value DD
-  - r/pennystocks     — pump-and-dump detection (contrarian signal)
-  - r/stockmarket     — general market discussion
+Target subreddits (multi-pillar OSINT, ordered by category):
+  Financial: wallstreetbets, stocks, investing, options, stockmarket,
+             dividends, thetagang, ValueInvesting, SecurityAnalysis
+  Crypto:    cryptocurrency, Bitcoin, ethereum, CryptoMarkets
+  Tech:      technology, gadgets, Android, apple, Windows10,
+             programming, webdev, startups, SaaS
+  Consumer:  BuyItForLife, personalfinance, frugal
 
 Rate limits:
   OAuth: 100 requests/minute
@@ -66,10 +65,35 @@ class RedditConfig:
 
     # Subreddits to monitor
     SUBREDDITS: list[str] = [
+        # Financial
         "wallstreetbets",
         "stocks",
-        "options",
         "investing",
+        "options",
+        "stockmarket",
+        "dividends",
+        "thetagang",
+        "ValueInvesting",
+        "SecurityAnalysis",
+        # Crypto
+        "cryptocurrency",
+        "Bitcoin",
+        "ethereum",
+        "CryptoMarkets",
+        # Tech / Product
+        "technology",
+        "gadgets",
+        "Android",
+        "apple",
+        "Windows10",
+        "programming",
+        "webdev",
+        "startups",
+        "SaaS",
+        # Consumer
+        "BuyItForLife",
+        "personalfinance",
+        "frugal",
     ]
 
     # Polling intervals

@@ -26,7 +26,7 @@ export default function GlobalPulsePage() {
   const stats = useStats();
   const liveSignals = useSignals(20, activeFilter);
   const liveSectors = useSectors(30, activeFilter);
-  const pulseCharts = usePulseCharts();
+  const pulseCharts = usePulseCharts(activeFilter);
 
   const displaySignals = liveSignals.length > 0 ? liveSignals : signalsData;
   const displaySectors = liveSectors.length > 0 ? liveSectors : sectorsData;

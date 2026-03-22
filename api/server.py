@@ -689,6 +689,48 @@ def _parse_since(since: Optional[str]) -> Optional[str]:
     return since
 
 
+def _compute_timeframe_volume(em: dict, cutoff: Optional[str]) -> tuple[int, float, int]:
+    """Compute volume, sentiment_sum, sentiment_count for an entity within a timeframe.
+
+    When *cutoff* is provided, only sample_docs whose created_at >= cutoff are counted.
+    Returns (volume, sentiment_sum, sentiment_count).
+    Falls back to the cumulative values when there is no cutoff or no sample_docs.
+    """
+    if not cutoff:
+        return em.get("volume", 0), em.get("sentiment_sum", 0.0), em.get("sentiment_count", 0)
+
+    docs = em.get("sample_docs", [])
+    if not docs:
+        # No sample_docs to filter — fall back to cumulative values only if last_seen is recent
+        if em.get("last_seen") and em["last_seen"] >= cutoff:
+            return em.get("volume", 0), em.get("sentiment_sum", 0.0), em.get("sentiment_count", 0)
+        return 0, 0.0, 0
+
+    import math
+
+    volume = 0
+    sentiment_sum = 0.0
+    sentiment_count = 0
+    for doc in docs:
+        doc_ts = doc.get("created_at") or ""
+        if doc_ts >= cutoff:
+            volume += 1
+            score = doc.get("score", 0)
+            if score and score > 0:
+                norm = 0.3 + 0.6 * min(1.0, math.log1p(score) / math.log1p(1000))
+                sentiment_sum += norm
+                sentiment_count += 1
+
+    # Scale volume: sample_docs is capped at 10, so estimate real volume proportionally
+    total_docs = len(docs)
+    total_volume = em.get("volume", 0)
+    if total_docs > 0 and volume > 0:
+        # Proportional estimate: (matching docs / total docs) * total cumulative volume
+        volume = max(volume, round(total_volume * volume / total_docs))
+
+    return volume, sentiment_sum, sentiment_count
+
+
 # ---------------------------------------------------------------------------
 # API Endpoints
 # ---------------------------------------------------------------------------
@@ -1158,7 +1200,6 @@ def get_sectors(
     since: Optional[str] = Query(None, description="ISO timestamp or preset: 1D,5D,1M,YTD,1Y,5Y"),
 ):
     """Entity mentions aggregated as sectors for the heat sphere."""
-    # Note: entity_mentions is cumulative; since filtering applies to last_seen
     cutoff = _parse_since(since)
     with _lock:
         if cutoff:
@@ -1166,17 +1207,24 @@ def get_sectors(
                         if v.get("last_seen") and v["last_seen"] >= cutoff}
         else:
             filtered = entity_mentions
-        entities = sorted(
-            filtered.values(),
-            key=lambda e: e["volume"],
-            reverse=True,
-        )[:limit]
+        # Take a snapshot for processing outside the lock
+        entities_snapshot = list(filtered.values())
+
+    # Compute timeframe-specific volume and sort by it
+    scored = []
+    for e in entities_snapshot:
+        tf_volume, tf_sent_sum, tf_sent_count = _compute_timeframe_volume(e, cutoff)
+        if tf_volume <= 0:
+            continue
+        scored.append((e, tf_volume, tf_sent_sum, tf_sent_count))
+    scored.sort(key=lambda t: t[1], reverse=True)
+    scored = scored[:limit]
 
     result = []
-    for e in entities:
-        # Compute actual sentiment from accumulated scores
-        if e.get("sentiment_count", 0) > 0:
-            sentiment = e["sentiment_sum"] / e["sentiment_count"]
+    for e, tf_volume, tf_sent_sum, tf_sent_count in scored:
+        # Compute sentiment from timeframe-filtered data
+        if tf_sent_count > 0:
+            sentiment = tf_sent_sum / tf_sent_count
         else:
             sentiment = 0.5
 
@@ -1189,7 +1237,7 @@ def get_sectors(
             "label": e["label"],
             "sector": ", ".join(source_list) if source_list else "Unknown",
             "sentiment": round(sentiment, 3),
-            "volume": e["volume"],
+            "volume": tf_volume,
             "priceChange24h": round((sentiment - 0.5) * 10, 1),  # Derive from sentiment
             "keywords": e["keywords"][:5],
             "sources": sources_dict,
@@ -1229,7 +1277,9 @@ def get_topics():
 
 
 @app.get("/api/pulse/charts")
-def get_pulse_charts():
+def get_pulse_charts(
+    since: Optional[str] = Query(None, description="ISO timestamp or preset: 1D,5D,1M,YTD,1Y,5Y"),
+):
     """Chart card datasets for the Global Pulse page, built from live entity_mentions."""
     _ECONOMIC_KEYWORDS = {
         "interest rate", "employment", "inflation", "gdp", "housing",
@@ -1237,44 +1287,60 @@ def get_pulse_charts():
         "federal reserve", "rate hike", "rate cut", "monetary policy",
     }
 
+    cutoff = _parse_since(since)
+
     with _lock:
         # Snapshot entity_mentions for processing
-        entities = list(entity_mentions.values())
+        raw_entities = list(entity_mentions.values())
+
+    # Pre-compute timeframe-filtered volume/sentiment for each entity
+    entities: list[dict] = []
+    for e in raw_entities:
+        tf_vol, tf_sent_sum, tf_sent_count = _compute_timeframe_volume(e, cutoff)
+        if tf_vol <= 0:
+            continue
+        # Create a lightweight copy with timeframe-specific values
+        entities.append({
+            **e,
+            "_tf_volume": tf_vol,
+            "_tf_sent_sum": tf_sent_sum,
+            "_tf_sent_count": tf_sent_count,
+        })
 
     # --- topSectors: highest sentiment entities with enough data ---
     top_candidates = [
         e for e in entities
-        if e.get("volume", 0) >= 5 and e.get("sentiment_count", 0) > 0
+        if e["_tf_volume"] >= 5 and e["_tf_sent_count"] > 0
     ]
     top_candidates.sort(
-        key=lambda e: e["sentiment_sum"] / e["sentiment_count"],
+        key=lambda e: e["_tf_sent_sum"] / e["_tf_sent_count"],
         reverse=True,
     )
     top_sectors = []
     for e in top_candidates[:5]:
-        avg = e["sentiment_sum"] / e["sentiment_count"]
+        avg = e["_tf_sent_sum"] / e["_tf_sent_count"]
         top_sectors.append({
             "name": e["label"],
             "score": round(avg * 100),
-            "volume": e["volume"],
+            "volume": e["_tf_volume"],
             "sources": dict(e["sources"]) if isinstance(e["sources"], dict) else {},
         })
 
     # --- emergingRisks: negative sentiment, high volume ---
     risk_candidates = [
         e for e in entities
-        if e.get("volume", 0) >= 5
-        and e.get("sentiment_count", 0) > 0
-        and (e["sentiment_sum"] / e["sentiment_count"]) < 0.45
+        if e["_tf_volume"] >= 5
+        and e["_tf_sent_count"] > 0
+        and (e["_tf_sent_sum"] / e["_tf_sent_count"]) < 0.45
     ]
-    risk_candidates.sort(key=lambda e: e["volume"], reverse=True)
+    risk_candidates.sort(key=lambda e: e["_tf_volume"], reverse=True)
     emerging_risks = []
     for e in risk_candidates[:5]:
-        avg = e["sentiment_sum"] / e["sentiment_count"]
+        avg = e["_tf_sent_sum"] / e["_tf_sent_count"]
         emerging_risks.append({
             "name": e["label"],
             "score": round((1.0 - avg) * 100),
-            "volume": e["volume"],
+            "volume": e["_tf_volume"],
             "sources": dict(e["sources"]) if isinstance(e["sources"], dict) else {},
         })
 
@@ -1283,8 +1349,8 @@ def get_pulse_charts():
     for e in entities:
         label_lower = e["label"].lower()
         if any(kw in label_lower for kw in _ECONOMIC_KEYWORDS):
-            if e.get("sentiment_count", 0) > 0:
-                avg = e["sentiment_sum"] / e["sentiment_count"]
+            if e["_tf_sent_count"] > 0:
+                avg = e["_tf_sent_sum"] / e["_tf_sent_count"]
             else:
                 avg = 0.5
             direction = "bullish" if avg > 0.5 else "bearish"
@@ -1292,7 +1358,7 @@ def get_pulse_charts():
                 "name": e["label"],
                 "score": round(avg * 100),
                 "direction": direction,
-                "volume": e["volume"],
+                "volume": e["_tf_volume"],
                 "sources": dict(e["sources"]) if isinstance(e["sources"], dict) else {},
             })
     # Sort by volume descending, take top 5
@@ -1312,6 +1378,9 @@ def get_pulse_charts():
         for doc in fred_docs:
             ts = doc.get("created_at") or doc.get("ingested_at") or ""
             if ts:
+                # Skip docs outside the timeframe cutoff
+                if cutoff and ts < cutoff:
+                    continue
                 day = ts[:10]  # YYYY-MM-DD
                 score = doc.get("quality_signals", {}).get("score", 0)
                 if score:
@@ -1839,9 +1908,12 @@ _REQUEST_KEYWORDS = {
 def get_innovation(
     source: Optional[str] = Query(None, description="Filter by source platform"),
     limit: int = Query(20, ge=1, le=100),
+    since: Optional[str] = Query(None, description="ISO timestamp or preset: 1D,5D,1M,YTD,1Y,5Y"),
 ):
     """Data for the Product Innovation dashboard page."""
     import math
+
+    cutoff = _parse_since(since)
 
     with _lock:
         # ----- channels: doc counts per source -----
@@ -1850,234 +1922,251 @@ def get_innovation(
             channels[src] = pipeline_stats["sources"].get(src, 0)
 
         # ----- collect entities, optionally filtered by source -----
-        filtered_entities: list[dict] = []
+        raw_filtered: list[dict] = []
         for em in entity_mentions.values():
             if source:
                 src_dict = em.get("sources", {})
                 if isinstance(src_dict, dict) and src_dict.get(source, 0) > 0:
-                    filtered_entities.append(em)
+                    raw_filtered.append(em)
             else:
-                filtered_entities.append(em)
+                raw_filtered.append(em)
 
-        # ----- criticisms: negative-sentiment entities -----
-        criticisms: list[dict] = []
-        for em in filtered_entities:
-            s_count = em.get("sentiment_count", 0)
-            if s_count <= 0:
-                continue
-            avg_sent = em["sentiment_sum"] / s_count
-            if avg_sent >= 0.45:
-                continue
-            # intensity: lower sentiment = higher intensity (0-1 scale)
-            intensity = round(1.0 - avg_sent, 3)
-            sample_quote = ""
-            sample_docs_list = em.get("sample_docs", [])
-            if sample_docs_list:
-                sample_quote = sample_docs_list[0].get("content") or sample_docs_list[0].get("title") or ""
-            src_dict = em.get("sources", {})
-            source_list = sorted(src_dict.keys()) if isinstance(src_dict, dict) else []
-            criticisms.append({
-                "feature": em.get("label", em["id"]),
-                "volume": em.get("volume", 0),
-                "intensity": intensity,
-                "sources": source_list,
-                "sample_quote": sample_quote[:300],
-            })
-        criticisms.sort(key=lambda c: c["volume"], reverse=True)
-        criticisms = criticisms[:limit]
+    # Apply timeframe filtering: compute per-entity timeframe volumes
+    filtered_entities: list[dict] = []
+    for em in raw_filtered:
+        tf_vol, tf_sent_sum, tf_sent_count = _compute_timeframe_volume(em, cutoff)
+        if tf_vol <= 0:
+            continue
+        filtered_entities.append({
+            **em,
+            "volume": tf_vol,
+            "sentiment_sum": tf_sent_sum,
+            "sentiment_count": tf_sent_count,
+        })
 
-        # ----- requests: entities with request-like keywords or product types -----
-        requests_list: list[dict] = []
-        for em in filtered_entities:
-            kws = [k.lower() for k in em.get("keywords", [])]
-            match_count = sum(1 for kw in kws for rk in _REQUEST_KEYWORDS if rk in kw)
-            etype = (em.get("entity_type") or "").upper()
-            is_product_type = etype in ("PRODUCT", "TECHNOLOGY")
+    # ----- criticisms: negative-sentiment entities -----
+    criticisms: list[dict] = []
+    for em in filtered_entities:
+        s_count = em.get("sentiment_count", 0)
+        if s_count <= 0:
+            continue
+        avg_sent = em["sentiment_sum"] / s_count
+        if avg_sent >= 0.45:
+            continue
+        # intensity: lower sentiment = higher intensity (0-1 scale)
+        intensity = round(1.0 - avg_sent, 3)
+        sample_quote = ""
+        sample_docs_list = em.get("sample_docs", [])
+        if sample_docs_list:
+            sample_quote = sample_docs_list[0].get("content") or sample_docs_list[0].get("title") or ""
+        src_dict = em.get("sources", {})
+        source_list = sorted(src_dict.keys()) if isinstance(src_dict, dict) else []
+        criticisms.append({
+            "feature": em.get("label", em["id"]),
+            "volume": em.get("volume", 0),
+            "intensity": intensity,
+            "sources": source_list,
+            "sample_quote": sample_quote[:300],
+        })
+    criticisms.sort(key=lambda c: c["volume"], reverse=True)
+    criticisms = criticisms[:limit]
 
-            if match_count == 0 and not is_product_type:
-                continue
+    # ----- requests: entities with request-like keywords or product types -----
+    requests_list: list[dict] = []
+    for em in filtered_entities:
+        kws = [k.lower() for k in em.get("keywords", [])]
+        match_count = sum(1 for kw in kws for rk in _REQUEST_KEYWORDS if rk in kw)
+        etype = (em.get("entity_type") or "").upper()
+        is_product_type = etype in ("PRODUCT", "TECHNOLOGY")
 
-            # intensity based on keyword match density
-            if kws:
-                intensity = round(min(1.0, match_count / max(len(kws), 1)), 3)
-            else:
-                intensity = 0.3 if is_product_type else 0.0
+        if match_count == 0 and not is_product_type:
+            continue
 
-            sample_quote = ""
-            sample_docs_list = em.get("sample_docs", [])
-            if sample_docs_list:
-                sample_quote = sample_docs_list[0].get("content") or sample_docs_list[0].get("title") or ""
-            src_dict = em.get("sources", {})
-            source_list = sorted(src_dict.keys()) if isinstance(src_dict, dict) else []
-            requests_list.append({
-                "feature": em.get("label", em["id"]),
-                "volume": em.get("volume", 0),
-                "intensity": intensity,
-                "sources": source_list,
-                "sample_quote": sample_quote[:300],
-            })
-        requests_list.sort(key=lambda r: r["volume"], reverse=True)
-        requests_list = requests_list[:limit]
+        # intensity based on keyword match density
+        if kws:
+            intensity = round(min(1.0, match_count / max(len(kws), 1)), 3)
+        else:
+            intensity = 0.3 if is_product_type else 0.0
 
-        # ----- gap_map: satisfaction vs importance scatter -----
-        gap_map: list[dict] = []
-        # Find max volume for log-normalization
-        volumes = [em.get("volume", 0) for em in filtered_entities if em.get("volume", 0) >= 3]
-        max_vol = max(volumes) if volumes else 1
-        log_max = math.log(max_vol) if max_vol > 1 else 1.0
+        sample_quote = ""
+        sample_docs_list = em.get("sample_docs", [])
+        if sample_docs_list:
+            sample_quote = sample_docs_list[0].get("content") or sample_docs_list[0].get("title") or ""
+        src_dict = em.get("sources", {})
+        source_list = sorted(src_dict.keys()) if isinstance(src_dict, dict) else []
+        requests_list.append({
+            "feature": em.get("label", em["id"]),
+            "volume": em.get("volume", 0),
+            "intensity": intensity,
+            "sources": source_list,
+            "sample_quote": sample_quote[:300],
+        })
+    requests_list.sort(key=lambda r: r["volume"], reverse=True)
+    requests_list = requests_list[:limit]
 
-        for em in filtered_entities:
-            vol = em.get("volume", 0)
-            if vol < 3:
-                continue
-            s_count = em.get("sentiment_count", 0)
-            satisfaction = round(em["sentiment_sum"] / s_count, 3) if s_count > 0 else 0.5
-            importance = round(min(1.0, math.log(max(vol, 1)) / log_max), 3) if log_max > 0 else 0.0
-            gap_map.append({
-                "feature": em.get("label", em["id"]),
-                "satisfaction": satisfaction,
-                "importance": importance,
-                "volume": vol,
-                "entity_id": em["id"],
-            })
-        gap_map.sort(key=lambda g: g["importance"], reverse=True)
-        gap_map = gap_map[:limit]
+    # ----- gap_map: satisfaction vs importance scatter -----
+    gap_map: list[dict] = []
+    # Find max volume for log-normalization
+    volumes = [em.get("volume", 0) for em in filtered_entities if em.get("volume", 0) >= 3]
+    max_vol = max(volumes) if volumes else 1
+    log_max = math.log(max_vol) if max_vol > 1 else 1.0
 
-        # ----- trending_topics: top keywords across all entities -----
-        keyword_counts: dict[str, int] = defaultdict(int)
-        for em in filtered_entities:
-            for kw in em.get("keywords", []):
-                keyword_counts[kw] += 1
-        trending_topics = sorted(
-            [{"keyword": kw, "count": cnt} for kw, cnt in keyword_counts.items()],
-            key=lambda t: t["count"],
-            reverse=True,
-        )[:20]
+    for em in filtered_entities:
+        vol = em.get("volume", 0)
+        if vol < 3:
+            continue
+        s_count = em.get("sentiment_count", 0)
+        satisfaction = round(em["sentiment_sum"] / s_count, 3) if s_count > 0 else 0.5
+        importance = round(min(1.0, math.log(max(vol, 1)) / log_max), 3) if log_max > 0 else 0.0
+        gap_map.append({
+            "feature": em.get("label", em["id"]),
+            "satisfaction": satisfaction,
+            "importance": importance,
+            "volume": vol,
+            "entity_id": em["id"],
+        })
+    gap_map.sort(key=lambda g: g["importance"], reverse=True)
+    gap_map = gap_map[:limit]
 
-        # ----- recent_insights: latest docs from product-related sources -----
-        recent_insights: list[dict] = []
+    # ----- trending_topics: top keywords across all entities -----
+    keyword_counts: dict[str, int] = defaultdict(int)
+    for em in filtered_entities:
+        for kw in em.get("keywords", []):
+            keyword_counts[kw] += 1
+    trending_topics = sorted(
+        [{"keyword": kw, "count": cnt} for kw, cnt in keyword_counts.items()],
+        key=lambda t: t["count"],
+        reverse=True,
+    )[:20]
+
+    # ----- recent_insights: latest docs from product-related sources -----
+    recent_insights: list[dict] = []
+    with _lock:
         for topic_key in _PRODUCT_TOPICS:
             for doc in recent_docs.get(topic_key, []):
                 doc_source = doc.get("source", "")
                 if source and doc_source != source:
+                    continue
+                doc_ts = doc.get("created_at") or doc.get("ingested_at") or ""
+                if cutoff and doc_ts < cutoff:
                     continue
                 recent_insights.append({
                     "title": (doc.get("title") or "")[:200],
                     "source": doc_source,
                     "content": (doc.get("content_text") or "")[:300],
                     "url": doc.get("url"),
-                    "created_at": doc.get("created_at") or doc.get("ingested_at"),
+                    "created_at": doc_ts,
                 })
-        # Sort by created_at descending, take latest N
-        recent_insights.sort(key=lambda d: d.get("created_at") or "", reverse=True)
-        recent_insights = recent_insights[:limit]
+    # Sort by created_at descending, take latest N
+    recent_insights.sort(key=lambda d: d.get("created_at") or "", reverse=True)
+    recent_insights = recent_insights[:limit]
 
-        # ----- source_breakdown: aggregate stats for active filter -----
-        total_entities = len(filtered_entities)
-        total_mentions = sum(em.get("volume", 0) for em in filtered_entities)
-        sent_sum = sum(em.get("sentiment_sum", 0) for em in filtered_entities if em.get("sentiment_count", 0) > 0)
-        sent_cnt = sum(em.get("sentiment_count", 0) for em in filtered_entities)
-        avg_sentiment = round(sent_sum / sent_cnt, 3) if sent_cnt > 0 else 0.5
+    # ----- source_breakdown: aggregate stats for active filter -----
+    total_entities = len(filtered_entities)
+    total_mentions = sum(em.get("volume", 0) for em in filtered_entities)
+    sent_sum = sum(em.get("sentiment_sum", 0) for em in filtered_entities if em.get("sentiment_count", 0) > 0)
+    sent_cnt = sum(em.get("sentiment_count", 0) for em in filtered_entities)
+    avg_sentiment = round(sent_sum / sent_cnt, 3) if sent_cnt > 0 else 0.5
 
-        # ----- opportunity_scores: add score to each gap_map entry -----
-        for gap in gap_map:
-            vol = gap["volume"]
-            log_vol = math.log(max(vol, 1)) if vol > 0 else 0.0
-            gap["opportunity_score"] = round(
-                (1.0 - gap["satisfaction"]) * gap["importance"] * min(1.0, log_vol / 5.0), 3
-            )
+    # ----- opportunity_scores: add score to each gap_map entry -----
+    for gap in gap_map:
+        vol = gap["volume"]
+        log_vol = math.log(max(vol, 1)) if vol > 0 else 0.0
+        gap["opportunity_score"] = round(
+            (1.0 - gap["satisfaction"]) * gap["importance"] * min(1.0, log_vol / 5.0), 3
+        )
 
-        # ----- sentiment_trends: add trend to criticisms and requests -----
-        # Build entity_id lookup from filtered_entities
-        _entity_by_label: dict[str, dict] = {}
-        for em in filtered_entities:
-            _entity_by_label[em.get("label", em["id"])] = em
+    # ----- sentiment_trends: add trend to criticisms and requests -----
+    # Build entity_id lookup from filtered_entities
+    _entity_by_label: dict[str, dict] = {}
+    for em in filtered_entities:
+        _entity_by_label[em.get("label", em["id"])] = em
 
-        def _compute_trend(feature_label: str) -> str:
-            """Compare first-half vs second-half sentiment of sample_docs."""
-            em = _entity_by_label.get(feature_label)
-            if not em:
-                return "stable"
-            docs = em.get("sample_docs", [])
-            if len(docs) < 2:
-                return "stable"
-            # Sort by created_at ascending
-            sorted_docs = sorted(docs, key=lambda d: d.get("created_at") or d.get("ingested_at") or "")
-            mid = len(sorted_docs) // 2
-            first_half = sorted_docs[:mid]
-            second_half = sorted_docs[mid:]
-
-            def _avg_sentiment_approx(doc_list: list) -> float:
-                """Approximate sentiment from content: negative words → lower score."""
-                _neg = {"bad", "worst", "terrible", "horrible", "awful", "hate", "slow",
-                        "bug", "crash", "broken", "fail", "disappointing", "poor", "useless"}
-                _pos = {"good", "great", "love", "fast", "excellent", "awesome", "perfect",
-                        "amazing", "best", "reliable", "helpful", "easy"}
-                total_score = 0.0
-                count = 0
-                for d in doc_list:
-                    text = ((d.get("content") or "") + " " + (d.get("title") or "")).lower()
-                    words = set(text.split())
-                    neg_count = len(words & _neg)
-                    pos_count = len(words & _pos)
-                    total = neg_count + pos_count
-                    if total > 0:
-                        total_score += pos_count / total
-                        count += 1
-                return total_score / count if count > 0 else 0.5
-
-            sent_first = _avg_sentiment_approx(first_half)
-            sent_second = _avg_sentiment_approx(second_half)
-            diff = sent_second - sent_first
-            if diff < -0.1:
-                return "worsening"
-            elif diff > 0.1:
-                return "improving"
+    def _compute_trend(feature_label: str) -> str:
+        """Compare first-half vs second-half sentiment of sample_docs."""
+        em = _entity_by_label.get(feature_label)
+        if not em:
             return "stable"
+        docs = em.get("sample_docs", [])
+        if len(docs) < 2:
+            return "stable"
+        # Sort by created_at ascending
+        sorted_docs = sorted(docs, key=lambda d: d.get("created_at") or d.get("ingested_at") or "")
+        mid = len(sorted_docs) // 2
+        first_half = sorted_docs[:mid]
+        second_half = sorted_docs[mid:]
 
-        for item in criticisms:
-            item["trend"] = _compute_trend(item["feature"])
-        for item in requests_list:
-            item["trend"] = _compute_trend(item["feature"])
+        def _avg_sentiment_approx(doc_list: list) -> float:
+            """Approximate sentiment from content: negative words -> lower score."""
+            _neg = {"bad", "worst", "terrible", "horrible", "awful", "hate", "slow",
+                    "bug", "crash", "broken", "fail", "disappointing", "poor", "useless"}
+            _pos = {"good", "great", "love", "fast", "excellent", "awesome", "perfect",
+                    "amazing", "best", "reliable", "helpful", "easy"}
+            total_score = 0.0
+            count = 0
+            for d in doc_list:
+                text = ((d.get("content") or "") + " " + (d.get("title") or "")).lower()
+                words = set(text.split())
+                neg_count = len(words & _neg)
+                pos_count = len(words & _pos)
+                total = neg_count + pos_count
+                if total > 0:
+                    total_score += pos_count / total
+                    count += 1
+            return total_score / count if count > 0 else 0.5
 
-        # ----- competitive_landscape: co-occurring entities -----
-        competitive_landscape: list[dict] = []
-        # Build a mapping of entity -> set of doc titles for co-occurrence
-        entity_doc_titles: dict[str, set[str]] = {}
-        top_entities = sorted(filtered_entities, key=lambda e: e.get("volume", 0), reverse=True)[:10]
-        top_entity_ids = {em["id"] for em in top_entities}
-        top_entity_labels = {em["id"]: em.get("label", em["id"]) for em in top_entities}
+        sent_first = _avg_sentiment_approx(first_half)
+        sent_second = _avg_sentiment_approx(second_half)
+        diff = sent_second - sent_first
+        if diff < -0.1:
+            return "worsening"
+        elif diff > 0.1:
+            return "improving"
+        return "stable"
 
-        # Collect doc title sets for each top entity
-        for em in top_entities:
-            titles = set()
-            for doc in em.get("sample_docs", []):
-                t = (doc.get("title") or "") + " " + (doc.get("content") or "")
-                if t.strip():
-                    titles.add(t.strip()[:200])
-            entity_doc_titles[em["id"]] = titles
+    for item in criticisms:
+        item["trend"] = _compute_trend(item["feature"])
+    for item in requests_list:
+        item["trend"] = _compute_trend(item["feature"])
 
-        # Find competitors by checking if other top entities' labels appear in docs
-        for em in top_entities:
-            docs_text = " ".join(entity_doc_titles.get(em["id"], [])).lower()
-            if not docs_text:
+    # ----- competitive_landscape: co-occurring entities -----
+    competitive_landscape: list[dict] = []
+    # Build a mapping of entity -> set of doc titles for co-occurrence
+    entity_doc_titles: dict[str, set[str]] = {}
+    top_entities = sorted(filtered_entities, key=lambda e: e.get("volume", 0), reverse=True)[:10]
+    top_entity_ids = {em["id"] for em in top_entities}
+    top_entity_labels = {em["id"]: em.get("label", em["id"]) for em in top_entities}
+
+    # Collect doc title sets for each top entity
+    for em in top_entities:
+        titles = set()
+        for doc in em.get("sample_docs", []):
+            t = (doc.get("title") or "") + " " + (doc.get("content") or "")
+            if t.strip():
+                titles.add(t.strip()[:200])
+        entity_doc_titles[em["id"]] = titles
+
+    # Find competitors by checking if other top entities' labels appear in docs
+    for em in top_entities:
+        docs_text = " ".join(entity_doc_titles.get(em["id"], [])).lower()
+        if not docs_text:
+            continue
+        competitors: list[str] = []
+        shared_count = 0
+        for other in top_entities:
+            if other["id"] == em["id"]:
                 continue
-            competitors: list[str] = []
-            shared_count = 0
-            for other in top_entities:
-                if other["id"] == em["id"]:
-                    continue
-                other_label = other.get("label", other["id"]).lower()
-                # Check if the other entity's label appears in this entity's docs
-                if other_label and len(other_label) > 1 and other_label in docs_text:
-                    competitors.append(top_entity_labels[other["id"]])
-                    shared_count += 1
-            if competitors:
-                competitive_landscape.append({
-                    "entity": top_entity_labels[em["id"]],
-                    "competitors": competitors,
-                    "shared_mentions": shared_count,
-                })
+            other_label = other.get("label", other["id"]).lower()
+            # Check if the other entity's label appears in this entity's docs
+            if other_label and len(other_label) > 1 and other_label in docs_text:
+                competitors.append(top_entity_labels[other["id"]])
+                shared_count += 1
+        if competitors:
+            competitive_landscape.append({
+                "entity": top_entity_labels[em["id"]],
+                "competitors": competitors,
+                "shared_mentions": shared_count,
+            })
 
     return {
         "channels": channels,
