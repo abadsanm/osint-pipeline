@@ -534,6 +534,434 @@ function SignalScorecard({ score }: { score: AlphaData["score"] }) {
 }
 
 // ---------------------------------------------------------------------------
+// Volume Profile (horizontal histogram + mini price chart)
+// ---------------------------------------------------------------------------
+
+function VolumeProfile({
+  candles,
+}: {
+  candles: AlphaData["candles"];
+}) {
+  const BUCKET_COUNT = 20;
+
+  const profileData = useMemo(() => {
+    if (!candles || candles.length === 0) return null;
+
+    const prices = candles.map((c) => c.close);
+    const priceMin = Math.min(...prices);
+    const priceMax = Math.max(...prices);
+    const range = priceMax - priceMin || 1;
+    const bucketSize = range / BUCKET_COUNT;
+
+    // Build volume buckets keyed by typical price
+    const buckets: { low: number; high: number; mid: number; volume: number }[] = [];
+    for (let i = 0; i < BUCKET_COUNT; i++) {
+      const low = priceMin + i * bucketSize;
+      const high = low + bucketSize;
+      buckets.push({ low, high, mid: (low + high) / 2, volume: 0 });
+    }
+
+    candles.forEach((c) => {
+      const typicalPrice = (c.high + c.low + c.close) / 3;
+      const idx = Math.min(
+        Math.floor((typicalPrice - priceMin) / bucketSize),
+        BUCKET_COUNT - 1,
+      );
+      if (idx >= 0) buckets[idx].volume += c.volume;
+    });
+
+    // POC = bucket with highest volume
+    const maxVol = Math.max(...buckets.map((b) => b.volume), 1);
+    const pocIdx = buckets.findIndex((b) => b.volume === maxVol);
+    const poc = buckets[pocIdx];
+
+    // Value Area: 70% of total volume centered on POC
+    const totalVolume = buckets.reduce((s, b) => s + b.volume, 0);
+    const vaTarget = totalVolume * 0.7;
+    let vaVolume = poc.volume;
+    let vaLowIdx = pocIdx;
+    let vaHighIdx = pocIdx;
+
+    while (vaVolume < vaTarget && (vaLowIdx > 0 || vaHighIdx < BUCKET_COUNT - 1)) {
+      const below = vaLowIdx > 0 ? buckets[vaLowIdx - 1].volume : -1;
+      const above = vaHighIdx < BUCKET_COUNT - 1 ? buckets[vaHighIdx + 1].volume : -1;
+      if (below >= above && below >= 0) {
+        vaLowIdx--;
+        vaVolume += buckets[vaLowIdx].volume;
+      } else if (above >= 0) {
+        vaHighIdx++;
+        vaVolume += buckets[vaHighIdx].volume;
+      } else {
+        break;
+      }
+    }
+
+    return {
+      buckets,
+      maxVol,
+      pocIdx,
+      poc,
+      vaLowIdx,
+      vaHighIdx,
+      vaLow: buckets[vaLowIdx].low,
+      vaHigh: buckets[vaHighIdx].high,
+      priceMin,
+      priceMax,
+      prices,
+    };
+  }, [candles]);
+
+  if (!profileData) {
+    return (
+      <div className="bg-surface border border-border rounded-card p-card-padding-lg flex flex-col">
+        <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-4">
+          Volume Profile
+        </h3>
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-sm text-text-muted">Awaiting data</p>
+        </div>
+      </div>
+    );
+  }
+
+  const { buckets, maxVol, pocIdx, poc, vaLowIdx, vaHighIdx, vaLow, vaHigh, priceMin, priceMax, prices } = profileData;
+
+  // SVG dimensions
+  const svgW = 520;
+  const svgH = 320;
+  const chartW = svgW * 0.58;
+  const histW = svgW * 0.38;
+  const histOffset = chartW + svgW * 0.04;
+  const topPad = 10;
+  const bottomPad = 20;
+  const plotH = svgH - topPad - bottomPad;
+
+  // Price → Y mapping (high at top)
+  const priceRange = priceMax - priceMin || 1;
+  const priceToY = (p: number) => topPad + (1 - (p - priceMin) / priceRange) * plotH;
+
+  // Mini price chart polyline
+  const pricePoints = prices
+    .map((p, i) => {
+      const x = (i / (prices.length - 1)) * (chartW - 20) + 10;
+      const y = priceToY(p);
+      return `${x},${y}`;
+    })
+    .join(" ");
+
+  return (
+    <div className="bg-surface border border-border rounded-card p-card-padding-lg">
+      <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-4">
+        Volume Profile
+      </h3>
+
+      <svg
+        viewBox={`0 0 ${svgW} ${svgH}`}
+        className="w-full"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        {/* Mini price chart */}
+        <polyline
+          points={pricePoints}
+          fill="none"
+          stroke="#E6EDF3"
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+        />
+
+        {/* POC horizontal reference line across chart area */}
+        <line
+          x1={0}
+          y1={priceToY(poc.mid)}
+          x2={chartW}
+          y2={priceToY(poc.mid)}
+          stroke="#58A6FF"
+          strokeWidth="1"
+          strokeDasharray="4 3"
+          opacity={0.5}
+        />
+
+        {/* Horizontal volume histogram */}
+        {buckets.map((b, i) => {
+          const barH = plotH / BUCKET_COUNT - 1;
+          const y = priceToY(b.high) + 0.5;
+          const barW = (b.volume / maxVol) * histW;
+          const inVA = i >= vaLowIdx && i <= vaHighIdx;
+          const isPOC = i === pocIdx;
+
+          return (
+            <rect
+              key={i}
+              x={histOffset}
+              y={y}
+              width={barW}
+              height={Math.max(barH, 1)}
+              rx={1}
+              fill={isPOC ? "#58A6FF" : "#3B82F6"}
+              opacity={inVA ? 0.85 : 0.4}
+            />
+          );
+        })}
+
+        {/* Value Area bracket labels on histogram side */}
+        <text
+          x={histOffset + histW + 4}
+          y={priceToY(vaHigh)}
+          fill="#8B949E"
+          fontSize="9"
+          fontFamily="Roboto Mono, monospace"
+          dominantBaseline="middle"
+        >
+          VAH
+        </text>
+        <text
+          x={histOffset + histW + 4}
+          y={priceToY(vaLow)}
+          fill="#8B949E"
+          fontSize="9"
+          fontFamily="Roboto Mono, monospace"
+          dominantBaseline="middle"
+        >
+          VAL
+        </text>
+        <text
+          x={histOffset + histW + 4}
+          y={priceToY(poc.mid)}
+          fill="#58A6FF"
+          fontSize="9"
+          fontFamily="Roboto Mono, monospace"
+          fontWeight="600"
+          dominantBaseline="middle"
+        >
+          POC
+        </text>
+
+        {/* Y-axis price labels (shared) */}
+        {[priceMin, priceMin + priceRange * 0.25, priceMin + priceRange * 0.5, priceMin + priceRange * 0.75, priceMax].map(
+          (p, i) => (
+            <text
+              key={i}
+              x={chartW + 2}
+              y={priceToY(p)}
+              fill="#7D8590"
+              fontSize="9"
+              fontFamily="Roboto Mono, monospace"
+              dominantBaseline="middle"
+            >
+              ${p.toFixed(0)}
+            </text>
+          ),
+        )}
+      </svg>
+
+      {/* Summary stats */}
+      <div className="grid grid-cols-3 gap-3 mt-3 text-center">
+        <div>
+          <p className="text-[10px] text-text-muted uppercase">POC</p>
+          <p className="font-mono text-xs text-accent-blue font-semibold">
+            ${poc.mid.toFixed(2)}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] text-text-muted uppercase">VA High</p>
+          <p className="font-mono text-xs text-text-primary">${vaHigh.toFixed(2)}</p>
+        </div>
+        <div>
+          <p className="text-[10px] text-text-muted uppercase">VA Low</p>
+          <p className="font-mono text-xs text-text-primary">${vaLow.toFixed(2)}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Volume & OBV Analysis (stacked bar + line)
+// ---------------------------------------------------------------------------
+
+function VolumeAnalysis({
+  technicals_series,
+}: {
+  technicals_series: AlphaData["technicals_series"];
+}) {
+  const { chartData, avgVolume, volumeTrend, obvTrend } = useMemo(() => {
+    if (!technicals_series || technicals_series.length === 0) {
+      return { chartData: [], avgVolume: 0, volumeTrend: "Stable", obvTrend: "Accumulation" };
+    }
+
+    const series = technicals_series.slice(-60);
+
+    const mapped = series.map((s) => ({
+      date: (s.date ?? s.Date ?? "").length > 5 ? (s.date ?? s.Date ?? "").slice(5) : (s.date ?? s.Date ?? ""),
+      volume: s.volume ?? s.Volume ?? 0,
+      obv: s.obv ?? s.OBV ?? 0,
+      close: s.close ?? s.Close ?? 0,
+      open: s.open ?? s.Open ?? s.close ?? s.Close ?? 0,
+    }));
+
+    // Color-code volume bars
+    const colored = mapped.map((d) => ({
+      ...d,
+      volumeUp: d.close >= d.open ? d.volume : 0,
+      volumeDown: d.close < d.open ? d.volume : 0,
+    }));
+
+    // Stats from last 20 days
+    const last20 = mapped.slice(-20);
+    const avg = last20.length > 0 ? last20.reduce((s, d) => s + d.volume, 0) / last20.length : 0;
+
+    // Volume trend: compare last 10 avg vs prior 10 avg
+    let volTrend = "Stable";
+    if (last20.length >= 20) {
+      const recent10 = last20.slice(-10).reduce((s, d) => s + d.volume, 0) / 10;
+      const prior10 = last20.slice(0, 10).reduce((s, d) => s + d.volume, 0) / 10;
+      const ratio = prior10 > 0 ? recent10 / prior10 : 1;
+      if (ratio > 1.15) volTrend = "Increasing";
+      else if (ratio < 0.85) volTrend = "Decreasing";
+    }
+
+    // OBV trend: direction of last few OBV values
+    let obvDir = "Accumulation";
+    if (mapped.length >= 5) {
+      const recentObv = mapped.slice(-5);
+      const obvStart = recentObv[0].obv;
+      const obvEnd = recentObv[recentObv.length - 1].obv;
+      if (obvEnd < obvStart) obvDir = "Distribution";
+    }
+
+    return { chartData: colored, avgVolume: avg, volumeTrend: volTrend, obvTrend: obvDir };
+  }, [technicals_series]);
+
+  if (chartData.length === 0) {
+    return (
+      <div className="bg-surface border border-border rounded-card p-card-padding-lg flex flex-col">
+        <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-4">
+          Volume &amp; OBV Analysis
+        </h3>
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-sm text-text-muted">Awaiting data</p>
+        </div>
+      </div>
+    );
+  }
+
+  const trendColor = (t: string) =>
+    t === "Increasing" || t === "Accumulation"
+      ? "text-bullish"
+      : t === "Decreasing" || t === "Distribution"
+        ? "text-bearish"
+        : "text-neutral";
+
+  const formatVolume = (v: number) => {
+    if (v >= 1e9) return `${(v / 1e9).toFixed(1)}B`;
+    if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
+    if (v >= 1e3) return `${(v / 1e3).toFixed(0)}K`;
+    return v.toFixed(0);
+  };
+
+  return (
+    <div className="bg-surface border border-border rounded-card p-card-padding-lg">
+      <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-4">
+        Volume &amp; OBV Analysis
+      </h3>
+
+      <ResponsiveContainer width="100%" height={260}>
+        <ComposedChart data={chartData} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#8B949E" strokeOpacity={0.1} />
+          <XAxis
+            dataKey="date"
+            tick={{ fontSize: 10, fill: "#8B949E" }}
+            axisLine={false}
+            tickLine={false}
+            interval="preserveStartEnd"
+          />
+          <YAxis
+            yAxisId="vol"
+            tick={{ fontSize: 10, fill: "#8B949E" }}
+            axisLine={false}
+            tickLine={false}
+            tickFormatter={(v: number) => formatVolume(v)}
+          />
+          <YAxis
+            yAxisId="obv"
+            orientation="right"
+            tick={{ fontSize: 10, fill: "#A78BFA" }}
+            axisLine={false}
+            tickLine={false}
+            tickFormatter={(v: number) => formatVolume(v)}
+          />
+          <Tooltip
+            contentStyle={{
+              backgroundColor: "#1C2128",
+              border: "1px solid #21262D",
+              borderRadius: 8,
+              fontSize: 11,
+            }}
+            labelStyle={{ color: "#E6EDF3" }}
+            formatter={(value: number, name: string) => [formatVolume(value), name]}
+          />
+          {/* Up-day volume (green) */}
+          <Bar
+            yAxisId="vol"
+            dataKey="volumeUp"
+            stackId="vol"
+            fill="#00FFC2"
+            fillOpacity={0.6}
+            radius={[1, 1, 0, 0]}
+            isAnimationActive={false}
+            name="Vol (Up)"
+          />
+          {/* Down-day volume (red) */}
+          <Bar
+            yAxisId="vol"
+            dataKey="volumeDown"
+            stackId="vol"
+            fill="#FF4B2B"
+            fillOpacity={0.6}
+            radius={[1, 1, 0, 0]}
+            isAnimationActive={false}
+            name="Vol (Down)"
+          />
+          {/* OBV line */}
+          <Line
+            yAxisId="obv"
+            type="monotone"
+            dataKey="obv"
+            stroke="#A78BFA"
+            strokeWidth={2}
+            dot={false}
+            name="OBV"
+            isAnimationActive={false}
+          />
+        </ComposedChart>
+      </ResponsiveContainer>
+
+      {/* Summary stats */}
+      <div className="grid grid-cols-3 gap-3 mt-3 text-center">
+        <div>
+          <p className="text-[10px] text-text-muted uppercase">Avg Vol (20d)</p>
+          <p className="font-mono text-xs text-text-primary font-semibold">
+            {formatVolume(avgVolume)}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] text-text-muted uppercase">Vol Trend</p>
+          <p className={`font-mono text-xs font-semibold ${trendColor(volumeTrend)}`}>
+            {volumeTrend}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] text-text-muted uppercase">OBV Trend</p>
+          <p className={`font-mono text-xs font-semibold ${trendColor(obvTrend)}`}>
+            {obvTrend}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Loading skeleton
 // ---------------------------------------------------------------------------
 
@@ -842,6 +1270,14 @@ export default function FinancialAlphaPage() {
             4. Signal Scorecard
             ================================================================ */}
         {data.score && <div className="mb-module-gap-lg"><SignalScorecard score={data.score} /></div>}
+
+        {/* ================================================================
+            4b. Volume Profile + Volume & OBV Analysis
+            ================================================================ */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-module-gap-lg mb-module-gap-lg">
+          <VolumeProfile candles={data.candles} />
+          <VolumeAnalysis technicals_series={data.technicals_series} />
+        </div>
 
         {/* ================================================================
             5. News & Sources Feed
