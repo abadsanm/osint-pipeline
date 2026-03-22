@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Header from "@/components/Header";
 import SourceTicker from "@/components/SourceTicker";
 import AnalysisModal from "@/components/AnalysisModal";
-import { Brain, ArrowLeft, ExternalLink, AlertTriangle, Loader2, Cpu, RefreshCw, CheckCircle, XCircle, Info } from "lucide-react";
+import { Brain, ArrowLeft, ExternalLink, AlertTriangle, Loader2, Cpu, RefreshCw, CheckCircle, XCircle, Info, X } from "lucide-react";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -20,6 +20,41 @@ import {
   BarChart,
   Cell,
 } from "recharts";
+
+// ---------------------------------------------------------------------------
+// InfoTooltip
+// ---------------------------------------------------------------------------
+
+function InfoTooltip({ title, children }: { title: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative inline-block">
+      <button
+        onClick={() => setOpen(!open)}
+        className="text-text-muted hover:text-accent-blue transition-colors p-0.5"
+        title={title}
+      >
+        <Info size={13} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-6 z-50 w-72 bg-surface-alt border border-border rounded-lg p-3 shadow-lg">
+            <div className="flex items-center justify-between mb-1.5">
+              <h4 className="text-xs font-semibold text-text-primary">{title}</h4>
+              <button onClick={() => setOpen(false)} className="text-text-muted hover:text-text-primary">
+                <X size={11} />
+              </button>
+            </div>
+            <div className="text-[11px] text-text-muted leading-relaxed space-y-1.5">
+              {children}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -222,9 +257,15 @@ function RSIGauge({ value }: { value: number | null }) {
 
   return (
     <div className="bg-surface border border-border rounded-card p-card-padding flex flex-col items-center">
-      <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3 self-start">
-        RSI (14)
-      </h4>
+      <div className="flex items-center justify-between mb-3 self-stretch">
+        <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">RSI (14)</h4>
+        <InfoTooltip title="Relative Strength Index (RSI)">
+          <p>Measures momentum on a 0-100 scale over the last 14 trading days.</p>
+          <p>Below 30 = oversold (price may bounce up — potential buying opportunity). Above 70 = overbought (price may pull back — consider taking profits).</p>
+          <p>40-60 = neutral, no strong momentum signal.</p>
+          <p>Most reliable when combined with other indicators — RSI alone can stay overbought in strong trends.</p>
+        </InfoTooltip>
+      </div>
       <svg width={140} height={80} viewBox="0 0 140 80">
         {/* Background arc */}
         <path
@@ -317,9 +358,15 @@ function MACDCard({
 
   return (
     <div className="bg-surface border border-border rounded-card p-card-padding">
-      <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
-        MACD
-      </h4>
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">MACD</h4>
+        <InfoTooltip title="MACD (Moving Average Convergence Divergence)">
+          <p>Tracks the relationship between two moving averages (12-day and 26-day EMA).</p>
+          <p>Green histogram bars = bullish momentum, red = bearish. A bullish crossover (MACD crossing above signal) often precedes upward moves.</p>
+          <p>Histogram shrinking toward zero signals momentum is weakening.</p>
+          <p>Works best for confirming trend direction, not for predicting reversals.</p>
+        </InfoTooltip>
+      </div>
 
       {macd === null ? (
         <p className="text-sm text-text-muted text-center py-6">Awaiting data</p>
@@ -377,9 +424,14 @@ function BollingerCard({ bb }: { bb: AlphaData["technicals"]["bb"] }) {
   if (!bb || bb.pctb === null || bb.pctb === undefined) {
     return (
       <div className="bg-surface border border-border rounded-card p-card-padding">
-        <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
-          Bollinger %B
-        </h4>
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Bollinger %B</h4>
+          <InfoTooltip title="Bollinger Bands %B">
+            <p>Shows where the current price sits within its volatility range.</p>
+            <p>0% = at the lower band (2 std devs below average). 100% = at the upper band.</p>
+            <p>Below 20% often signals oversold; above 80% signals overbought.</p>
+          </InfoTooltip>
+        </div>
         <p className="text-sm text-text-muted text-center py-6">Awaiting data</p>
       </div>
     );
@@ -404,9 +456,16 @@ function BollingerCard({ bb }: { bb: AlphaData["technicals"]["bb"] }) {
 
   return (
     <div className="bg-surface border border-border rounded-card p-card-padding">
-      <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
-        Bollinger %B
-      </h4>
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Bollinger %B</h4>
+        <InfoTooltip title="Bollinger Bands %B">
+          <p>Shows where the current price sits within its volatility range.</p>
+          <p>0% = at the lower band (2 standard deviations below average). 100% = at the upper band (2 standard deviations above).</p>
+          <p>Below 20% often signals oversold conditions; above 80% signals overbought.</p>
+          <p>Bands widen during volatility, narrow during consolidation (a "squeeze" often precedes a big move).</p>
+          <p>Upper/Middle/Lower values show the actual price levels of the bands.</p>
+        </InfoTooltip>
+      </div>
 
       {/* Horizontal position bar */}
       <div className="relative h-6 rounded-full overflow-hidden bg-surface-alt mb-2 mx-1">
@@ -481,9 +540,15 @@ function SignalScorecard({ score }: { score: AlphaData["score"] }) {
 
   return (
     <div className="bg-surface border border-border rounded-card p-card-padding-lg">
-      <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-4">
-        Alpha Score
-      </h3>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Alpha Score</h3>
+        <InfoTooltip title="Alpha Signal Scorecard">
+          <p>Combines 6 independent factors into a single directional score (-1 to +1).</p>
+          <p>Sentiment (25%): FinBERT NLP analysis of pipeline content. SVC (15%): Sentiment Volume Convergence — sentiment shift x volume change. Technicals (20%): RSI, MACD, Bollinger Bands, moving averages combined.</p>
+          <p>Microstructure (15%): VWAP position, volume profile, fair value gaps. Order Flow (15%): Buy/sell imbalance from trade data. Correlation (10%): Multi-source agreement strength.</p>
+          <p>When factors with no data are absent, their weight redistributes proportionally. Higher confidence = more factors agree on the direction.</p>
+        </InfoTooltip>
+      </div>
 
       <div className="flex items-start gap-6 mb-4">
         {/* Overall score */}
@@ -642,9 +707,14 @@ function VolumeProfile({
   if (!profileData) {
     return (
       <div className="bg-surface border border-border rounded-card p-card-padding-lg flex flex-col">
-        <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-4">
-          Volume Profile
-        </h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Volume Profile</h3>
+          <InfoTooltip title="Volume Profile (Price x Volume)">
+            <p>Horizontal histogram showing how much volume traded at each price level.</p>
+            <p>POC (Point of Control): The price where most volume traded — acts as a magnet.</p>
+            <p>Value Area (blue bars): Price range containing 70% of all volume — where "fair value" lives.</p>
+          </InfoTooltip>
+        </div>
         <div className="flex-1 flex items-center justify-center">
           <p className="text-sm text-text-muted">Awaiting data</p>
         </div>
@@ -679,9 +749,15 @@ function VolumeProfile({
 
   return (
     <div className="bg-surface border border-border rounded-card p-card-padding-lg">
-      <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-4">
-        Volume Profile
-      </h3>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Volume Profile</h3>
+        <InfoTooltip title="Volume Profile (Price x Volume)">
+          <p>Horizontal histogram showing how much volume traded at each price level.</p>
+          <p>POC (Point of Control): The price where most volume traded — acts as a magnet. Value Area (blue bars): Price range containing 70% of all volume — where "fair value" lives.</p>
+          <p>If current price is above the value area, the market may be overextended. If price approaches POC from above or below, expect support/resistance at that level.</p>
+          <p>Thin volume areas (gaps in the profile) often see fast price moves through them.</p>
+        </InfoTooltip>
+      </div>
 
       <svg
         viewBox={`0 0 ${svgW} ${svgH}`}
@@ -863,9 +939,14 @@ function VolumeAnalysis({
   if (chartData.length === 0) {
     return (
       <div className="bg-surface border border-border rounded-card p-card-padding-lg flex flex-col">
-        <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-4">
-          Volume &amp; OBV Analysis
-        </h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Volume &amp; OBV Analysis</h3>
+          <InfoTooltip title="Volume & On-Balance Volume (OBV)">
+            <p>Green bars = up days (buying), red bars = down days (selling).</p>
+            <p>OBV purple line tracks cumulative buying vs selling pressure.</p>
+            <p>Rising OBV + rising price = confirmed uptrend (money flowing in). Falling OBV + rising price = divergence warning.</p>
+          </InfoTooltip>
+        </div>
         <div className="flex-1 flex items-center justify-center">
           <p className="text-sm text-text-muted">Awaiting data</p>
         </div>
@@ -889,9 +970,14 @@ function VolumeAnalysis({
 
   return (
     <div className="bg-surface border border-border rounded-card p-card-padding-lg">
-      <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-4">
-        Volume &amp; OBV Analysis
-      </h3>
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Volume &amp; OBV Analysis</h3>
+        <InfoTooltip title="Volume & On-Balance Volume (OBV)">
+          <p>Green bars = up days (buying), red bars = down days (selling). OBV purple line tracks cumulative buying vs selling pressure.</p>
+          <p>Rising OBV + rising price = confirmed uptrend (money flowing in). Falling OBV + rising price = divergence warning (smart money may be selling).</p>
+          <p>Volume spikes often signal the start or end of a trend. Average volume and trend indicators help identify if activity is increasing or decreasing.</p>
+        </InfoTooltip>
+      </div>
 
       <ResponsiveContainer width="100%" height={260}>
         <ComposedChart data={chartData} margin={{ top: 5, right: 5, bottom: 0, left: 0 }}>
@@ -1045,6 +1131,11 @@ function MLPredictionPanel({ data }: { data: AlphaData }) {
             <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
               ML Forecast
             </h3>
+            <InfoTooltip title="Machine Learning Prediction">
+              <p>Uses a LightGBM ensemble model trained on historical feature snapshots.</p>
+              <p>Predicts 1-day and 5-day price direction (up/down/flat) with probability estimates. Score Blend combines rule-based analysis (60%) with ML prediction (40%).</p>
+              <p>Requires 50+ labeled samples to train — keep the pipeline running to accumulate data. Retrain periodically to adapt to changing market conditions.</p>
+            </InfoTooltip>
           </div>
           <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-neutral/20 text-text-muted border border-neutral/30">
             Not Trained
@@ -1099,6 +1190,12 @@ function MLPredictionPanel({ data }: { data: AlphaData }) {
           <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
             ML Forecast
           </h3>
+          <InfoTooltip title="Machine Learning Prediction">
+            <p>Uses a LightGBM ensemble model trained on historical feature snapshots.</p>
+            <p>Predicts 1-day and 5-day price direction (up/down/flat) with probability estimates. Score Blend combines rule-based analysis (60%) with ML prediction (40%).</p>
+            <p>Feature Importance shows which indicators the model found most predictive. The model improves over time as more labeled data accumulates in the feature store.</p>
+            <p>Retrain periodically to adapt to changing market conditions.</p>
+          </InfoTooltip>
         </div>
         <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-bullish/20 text-bullish border border-bullish/30">
           Trained
@@ -1505,9 +1602,15 @@ export default function FinancialAlphaPage() {
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-module-gap-lg mb-module-gap-lg">
           {/* Main Price Chart */}
           <div className="bg-surface border border-border rounded-card p-card-padding-lg min-h-[400px]">
-            <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
-              Price + Sentiment Overlay
-            </h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Price + Sentiment Overlay</h3>
+              <InfoTooltip title="Price + Sentiment Chart">
+                <p>Shows the closing price overlaid with pipeline sentiment score.</p>
+                <p>Blue dashed lines are SMA20 (short-term trend) and SMA50 (medium-term trend). When price crosses above SMA20, it signals short-term bullish momentum.</p>
+                <p>When sentiment diverges from price (sentiment falling while price rising), it is a warning signal.</p>
+                <p>Volume bars at the bottom show trading activity — spikes often precede big moves.</p>
+              </InfoTooltip>
+            </div>
             <ResponsiveContainer width="100%" height={420}>
               <ComposedChart
                 data={chartDataWithScaledVol}
@@ -1649,9 +1752,14 @@ export default function FinancialAlphaPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-module-gap-lg mb-module-gap-lg">
           {/* Left: Pipeline Signals */}
           <div className="bg-surface border border-border rounded-card p-card-padding-lg">
-            <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-4">
-              Pipeline Signals
-            </h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Pipeline Signals</h3>
+              <InfoTooltip title="Pipeline Signals">
+                <p>Headlines and documents from the OSINT pipeline that mention this ticker.</p>
+                <p>Each card shows the title, source, timestamp, and a content preview. Click linked titles to open the original source.</p>
+                <p>Source colors indicate the data origin (HackerNews, GitHub, Reddit, SEC, etc.).</p>
+              </InfoTooltip>
+            </div>
             {data.sentiment.sample_docs.length === 0 ? (
               <p className="text-sm text-text-muted text-center py-6">No documents available</p>
             ) : (
@@ -1713,9 +1821,14 @@ export default function FinancialAlphaPage() {
 
           {/* Right: Signal Context */}
           <div className="bg-surface border border-border rounded-card p-card-padding-lg">
-            <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-4">
-              Signal Context
-            </h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Signal Context</h3>
+              <InfoTooltip title="Signal Context">
+                <p>Cross-correlated signal from the pipeline engine, combining multiple data sources.</p>
+                <p>Confidence score reflects multi-source agreement strength. Higher confidence means more independent sources agree on the signal direction.</p>
+                <p>Keywords show the most frequent terms driving sentiment. Volume by Source breaks down how many documents came from each data source.</p>
+              </InfoTooltip>
+            </div>
 
             {data.signal ? (
               <div className="space-y-4">
