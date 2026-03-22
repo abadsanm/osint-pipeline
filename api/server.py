@@ -37,7 +37,7 @@ if _env_path.exists():
 _INSTANCE_ID = uuid.uuid4().hex[:8]
 
 from confluent_kafka import Consumer, KafkaError
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 logging.basicConfig(
@@ -96,6 +96,100 @@ _lock = threading.Lock()
 from stock_alpha.backtester import SignalBacktester
 _backtester = SignalBacktester()
 
+# ---------------------------------------------------------------------------
+# SQLite persistence layer
+# ---------------------------------------------------------------------------
+
+from api.persistence import SentinelDB
+
+db = SentinelDB()  # data/sentinel.db — auto-creates data/ dir
+
+
+def _restore_state_from_db():
+    """Populate in-memory caches from the persisted DB on startup."""
+    global pipeline_stats
+
+    # --- Restore pipeline_stats and topic_counts ---
+    saved_stats, saved_tc = db.load_stats()
+    if saved_stats:
+        for k, v in saved_stats.items():
+            if k == "sources":
+                # Merge into the defaultdict
+                if isinstance(v, dict):
+                    for sk, sv in v.items():
+                        pipeline_stats["sources"][sk] = sv
+            elif k in pipeline_stats:
+                pipeline_stats[k] = v
+        # Keep the current started_at (this is a fresh run)
+        pipeline_stats["started_at"] = datetime.now(timezone.utc).isoformat()
+
+    if saved_tc:
+        for k, v in saved_tc.items():
+            topic_counts[k] = v
+
+    # --- Restore entity_mentions ---
+    db_entities = db.get_entities(limit=5000)
+    for ent in db_entities:
+        eid = ent["id"]
+        # Convert sources dict back to defaultdict(int)
+        src = defaultdict(int)
+        for sk, sv in ent.get("sources", {}).items():
+            src[sk] = sv
+        ent["sources"] = src
+        entity_mentions[eid] = ent
+
+    # --- Restore signals ---
+    db_signals = db.get_signals(limit=MAX_ITEMS)
+    db_signals.reverse()  # oldest first so deque ordering is correct
+    for sig in db_signals:
+        signals.append(sig)
+
+    # --- Restore alerts ---
+    db_alerts = db.get_alerts(limit=200)
+    db_alerts.reverse()  # oldest first
+    for alert in db_alerts:
+        alerts.append(alert)
+
+    # --- Restore backtest records ---
+    db_records = db.get_backtest_records(limit=1000)
+    for rec in db_records:
+        sid = rec.get("signal_id", "")
+        if sid and sid not in _backtester._records:
+            from stock_alpha.backtester import SignalRecord
+            ts = rec.get("timestamp", "")
+            if isinstance(ts, str) and ts:
+                try:
+                    timestamp = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                except ValueError:
+                    timestamp = datetime.now(timezone.utc)
+            else:
+                timestamp = datetime.now(timezone.utc)
+            _backtester._records[sid] = SignalRecord(
+                signal_id=sid,
+                ticker=rec.get("ticker", ""),
+                direction=rec.get("direction", "neutral"),
+                signal_score=rec.get("signal_score", 0.0),
+                confidence=rec.get("confidence", 0.0),
+                price_at_signal=rec.get("price_at_signal", 0.0),
+                timestamp=timestamp,
+                price_1d=rec.get("price_1d"),
+                price_5d=rec.get("price_5d"),
+                price_10d=rec.get("price_10d"),
+                correct_1d=rec.get("correct_1d"),
+                correct_5d=rec.get("correct_5d"),
+                correct_10d=rec.get("correct_10d"),
+            )
+
+    log.info(
+        "State restored from DB: %d entities, %d signals, %d alerts, %d backtest records",
+        len(entity_mentions), len(signals), len(alerts), len(_backtester._records),
+    )
+
+
+# Periodic stats saver timestamp
+_last_stats_save: float = 0.0
+_STATS_SAVE_INTERVAL = 60.0  # seconds
+
 
 # ---------------------------------------------------------------------------
 # Kafka background consumers
@@ -144,6 +238,9 @@ def _consume_raw_topics():
 
                 # Track entity mentions for heat sphere
                 _track_entity_from_doc(doc)
+
+                # Periodic stats save
+                _maybe_save_stats()
 
         except Exception as e:
             log.warning("Failed to process raw message: %s", e)
@@ -221,6 +318,25 @@ def _track_entity_from_doc(doc: dict):
                 "score": quality_score,
                 "headline": (title or content)[:150],
             })
+
+        # Persist to SQLite
+        try:
+            db.upsert_entity(eid, em)
+        except Exception as e:
+            log.debug("DB upsert_entity failed for %s: %s", eid, e)
+
+
+def _maybe_save_stats():
+    """Save pipeline_stats and topic_counts to DB every _STATS_SAVE_INTERVAL seconds."""
+    global _last_stats_save
+    now = time.time()
+    if now - _last_stats_save < _STATS_SAVE_INTERVAL:
+        return
+    _last_stats_save = now
+    try:
+        db.save_stats(pipeline_stats, topic_counts)
+    except Exception as e:
+        log.debug("DB save_stats failed: %s", e)
 
 
 def _consume_signals():
@@ -306,6 +422,12 @@ def _consume_signals():
                     if dedup_key not in existing_keys:
                         signals.append(signal_entry)
                         _evaluate_alerts(signal_entry)
+
+                        # Persist signal to SQLite
+                        try:
+                            db.add_signal(signal_entry)
+                        except Exception as e:
+                            log.debug("DB add_signal failed: %s", e)
 
                 elif topic == "stock.alpha.signals":
                     # Record alpha signals for backtesting
@@ -407,7 +529,7 @@ def _evaluate_alerts(signal_entry: dict):
             continue  # Skip — same alert type + ticker fired recently
 
         _alert_dedup[dedup_key] = now
-        alerts.append({
+        alert_entry = {
             "id": uuid.uuid4().hex[:12],
             "type": alert_type,
             "priority": priority,
@@ -416,7 +538,14 @@ def _evaluate_alerts(signal_entry: dict):
             "message": message,
             "timestamp": timestamp,
             "read": False,
-        })
+        }
+        alerts.append(alert_entry)
+
+        # Persist alert to SQLite
+        try:
+            db.add_alert(alert_entry)
+        except Exception as e:
+            log.debug("DB add_alert failed: %s", e)
 
     # Prune old dedup entries (older than 2x window) to prevent unbounded growth
     cutoff = now - _ALERT_DEDUP_WINDOW * 2
@@ -468,6 +597,20 @@ def _record_alpha_for_backtest(data: dict):
             price_at_signal=price,
             timestamp=timestamp,
         )
+
+        # Persist backtest record to SQLite
+        try:
+            db.add_backtest_record({
+                "signal_id": signal_id,
+                "ticker": ticker,
+                "direction": direction,
+                "signal_score": signal_score,
+                "confidence": confidence,
+                "price_at_signal": price,
+                "timestamp": timestamp,
+            })
+        except Exception as e2:
+            log.debug("DB add_backtest_record failed: %s", e2)
     except Exception as e:
         log.warning("Failed to record alpha signal for backtest: %s", e)
 
@@ -564,6 +707,7 @@ def mark_alert_read(alert_id: str):
         for a in alerts:
             if a["id"] == alert_id:
                 a["read"] = True
+                db.mark_alert_read(alert_id)
                 return {"ok": True, "id": alert_id}
     return {"ok": False, "error": "alert not found"}
 
@@ -577,6 +721,7 @@ def mark_all_alerts_read():
             if not a.get("read", False):
                 a["read"] = True
                 count += 1
+    db.mark_all_alerts_read()
     return {"ok": True, "marked": count}
 
 
@@ -599,6 +744,103 @@ def get_backtest_stats(
     stats = _backtester.get_accuracy_stats()
     stats["newly_evaluated"] = newly_evaluated
     return stats
+
+
+# ---------------------------------------------------------------------------
+# Settings Endpoints
+# ---------------------------------------------------------------------------
+
+_DEFAULT_SETTINGS = {
+    "watchlist": ["AAPL", "TSLA", "NVDA", "MSFT", "GOOGL", "META", "AMZN", "SPY", "QQQ"],
+    "alert_thresholds": {
+        "high_confidence": 0.75,
+        "volume_spike": 20,
+        "convergence_sources": 3,
+    },
+    "refresh_intervals": {
+        "signals": 15,
+        "alpha": 30,
+        "innovation": 15,
+    },
+    "connectors": {
+        "hacker_news": True,
+        "github": True,
+        "reddit": True,
+        "sec_edgar": True,
+        "google_trends": True,
+        "financial_news": True,
+        "fred": True,
+        "producthunt": True,
+        "openinsider": True,
+        "binance": True,
+        "alpaca": False,
+    },
+    "display": {
+        "theme": "dark",
+        "chart_style": "line",
+        "show_source_ticker": True,
+        "default_timeframe": "1D",
+    },
+}
+
+_SETTINGS_FILE = Path(__file__).resolve().parent.parent / "data" / "settings.json"
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge override into base, returning a new dict."""
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def _load_settings() -> dict:
+    """Load settings from disk, merged over defaults."""
+    settings = json.loads(json.dumps(_DEFAULT_SETTINGS))  # deep copy
+    if _SETTINGS_FILE.exists():
+        try:
+            with open(_SETTINGS_FILE) as f:
+                saved = json.load(f)
+            settings = _deep_merge(settings, saved)
+        except Exception as exc:
+            log.warning("Failed to load settings from %s: %s", _SETTINGS_FILE, exc)
+    return settings
+
+
+def _save_settings(settings: dict) -> None:
+    """Persist settings to disk."""
+    _SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(_SETTINGS_FILE, "w") as f:
+        json.dump(settings, f, indent=2)
+
+
+_settings = _load_settings()
+
+
+@app.get("/api/settings")
+def get_settings():
+    """Return all current settings."""
+    return _settings
+
+
+@app.put("/api/settings")
+def update_settings(body: dict):
+    """Deep-merge incoming settings with current settings and persist."""
+    global _settings
+    _settings = _deep_merge(_settings, body)
+    _save_settings(_settings)
+    return _settings
+
+
+@app.get("/api/settings/{key}")
+def get_setting(key: str):
+    """Return a single top-level setting value."""
+    if key not in _settings:
+        raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
+    return {key: _settings[key]}
 
 
 @app.get("/api/sectors")
@@ -1458,12 +1700,30 @@ Current sentiment is {sentiment_label} at {sentiment:.0%}. {"This suggests posit
 
 @app.on_event("startup")
 async def startup():
+    # Restore persisted state from SQLite before starting consumers
+    try:
+        _restore_state_from_db()
+    except Exception as e:
+        log.warning("Failed to restore state from DB (starting fresh): %s", e)
+
     # Start background Kafka consumers
     t1 = threading.Thread(target=_consume_raw_topics, daemon=True)
     t1.start()
     t2 = threading.Thread(target=_consume_signals, daemon=True)
     t2.start()
     log.info("Sentinel API started — Kafka consumers running")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Flush final state to SQLite on shutdown."""
+    try:
+        with _lock:
+            db.save_stats(pipeline_stats, topic_counts)
+        log.info("Final stats saved to DB")
+    except Exception as e:
+        log.warning("Failed to save final stats: %s", e)
+    db.close()
 
 
 if __name__ == "__main__":
