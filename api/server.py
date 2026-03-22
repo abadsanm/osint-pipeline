@@ -76,6 +76,21 @@ alerts: deque = deque(maxlen=200)
 _alert_dedup: dict[tuple[str, str], float] = {}
 _ALERT_DEDUP_WINDOW = 30 * 60  # 30 minutes in seconds
 
+# Predictions tracking
+predictions: deque = deque(maxlen=1000)
+prediction_outcomes: deque = deque(maxlen=1000)
+prediction_stats = {
+    "total_predictions": 0,
+    "total_evaluated": 0,
+    "correct": 0,
+    "by_regime": defaultdict(lambda: {"total": 0, "correct": 0}),
+    "by_horizon": defaultdict(lambda: {"total": 0, "correct": 0}),
+    "by_direction": defaultdict(lambda: {"total": 0, "correct": 0}),
+    "calibration_bins": defaultdict(lambda: {"predicted_sum": 0.0, "actual_correct": 0, "count": 0}),
+    "recent_accuracy_window": deque(maxlen=200),
+    "model_agreement": {"4_agree": 0, "3_agree": 0, "2_agree": 0, "total": 0},
+}
+
 # Entity mention counts (for heat sphere)
 entity_mentions: dict[str, dict] = {}
 
@@ -680,6 +695,100 @@ def _record_alpha_for_backtest(data: dict):
         log.warning("Failed to record alpha signal for backtest: %s", e)
 
 
+def _consume_predictions():
+    """Background thread: consume predictions and outcomes for tracking."""
+    pred_topics = [
+        "stock.alpha.predictions",
+        "stock.alpha.outcomes",
+    ]
+
+    consumer = Consumer({
+        "bootstrap.servers": "localhost:9092",
+        "group.id": f"sentinel-api-predictions-{_INSTANCE_ID}",
+        "auto.offset.reset": "earliest",
+        "enable.auto.commit": True,
+    })
+    consumer.subscribe(pred_topics)
+    log.info("Prediction topic consumer started: %s", pred_topics)
+
+    while True:
+        msg = consumer.poll(1.0)
+        if msg is None:
+            continue
+        if msg.error():
+            if msg.error().code() != KafkaError._PARTITION_EOF:
+                log.error("Prediction consumer error: %s", msg.error())
+            continue
+
+        try:
+            data = json.loads(msg.value())
+            topic = msg.topic()
+
+            with _lock:
+                topic_counts[topic] += 1
+
+                if topic == "stock.alpha.predictions":
+                    predictions.append(data)
+                    prediction_stats["total_predictions"] += 1
+
+                    # Track model agreement from contributing_signals
+                    contrib = data.get("contributing_signals", [])
+                    if contrib:
+                        directions = [s.get("signal_type") for s in contrib if s.get("signal_type")]
+                        # Count how many models agree on the majority direction
+                        if directions:
+                            from collections import Counter as _Counter
+                            most_common_dir, most_common_count = _Counter(directions).most_common(1)[0]
+                            prediction_stats["model_agreement"]["total"] += 1
+                            if most_common_count >= 4:
+                                prediction_stats["model_agreement"]["4_agree"] += 1
+                            elif most_common_count >= 3:
+                                prediction_stats["model_agreement"]["3_agree"] += 1
+                            elif most_common_count >= 2:
+                                prediction_stats["model_agreement"]["2_agree"] += 1
+
+                elif topic == "stock.alpha.outcomes":
+                    prediction_outcomes.append(data)
+                    prediction_stats["total_evaluated"] += 1
+
+                    is_correct = data.get("outcome") == "correct"
+                    if is_correct:
+                        prediction_stats["correct"] += 1
+
+                    # Update by_regime
+                    regime = data.get("regime", "unknown")
+                    prediction_stats["by_regime"][regime]["total"] += 1
+                    if is_correct:
+                        prediction_stats["by_regime"][regime]["correct"] += 1
+
+                    # Update by_horizon
+                    horizon = str(data.get("time_horizon_hours", "unknown"))
+                    prediction_stats["by_horizon"][horizon]["total"] += 1
+                    if is_correct:
+                        prediction_stats["by_horizon"][horizon]["correct"] += 1
+
+                    # Update by_direction
+                    direction = data.get("direction", "unknown")
+                    prediction_stats["by_direction"][direction]["total"] += 1
+                    if is_correct:
+                        prediction_stats["by_direction"][direction]["correct"] += 1
+
+                    # Update calibration bins (10 bins: 0-10%, 10-20%, ... 90-100%)
+                    conf = data.get("confidence", 0.5)
+                    bin_idx = min(int(conf * 10), 9)  # 0-9
+                    bin_key = f"{bin_idx * 10}-{(bin_idx + 1) * 10}%"
+                    prediction_stats["calibration_bins"][bin_key]["predicted_sum"] += conf
+                    prediction_stats["calibration_bins"][bin_key]["count"] += 1
+                    if is_correct:
+                        prediction_stats["calibration_bins"][bin_key]["actual_correct"] += 1
+
+                    # Update recent accuracy window
+                    prediction_stats["recent_accuracy_window"].append(1 if is_correct else 0)
+
+        except Exception as e:
+            log.warning("Failed to process prediction message: %s", e)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -992,6 +1101,143 @@ def ml_feature_importance():
         return {"features": importance}
     except Exception as e:
         return {"features": [], "reason": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Prediction & Backtesting Endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/predictions")
+def get_predictions(
+    ticker: Optional[str] = Query(None, description="Filter by ticker symbol"),
+    direction: Optional[str] = Query(None, description="Filter by direction: bullish, bearish, neutral"),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Recent predictions, newest first. Optional ticker and direction filters."""
+    with _lock:
+        items = list(predictions)
+    # Apply filters
+    if ticker:
+        ticker_upper = ticker.upper().strip()
+        items = [p for p in items if (p.get("ticker") or "").upper() == ticker_upper]
+    if direction:
+        direction_lower = direction.lower().strip()
+        items = [p for p in items if (p.get("direction") or "").lower() == direction_lower]
+    items = items[-limit:]
+    items.reverse()
+    return items
+
+
+@app.get("/api/predictions/stats")
+def get_prediction_stats():
+    """Full prediction statistics: accuracy, rolling accuracy, regime/horizon/direction breakdowns,
+    calibration curve, and model agreement percentages."""
+    with _lock:
+        total_eval = prediction_stats["total_evaluated"]
+        correct = prediction_stats["correct"]
+        overall_accuracy = (correct / total_eval) if total_eval > 0 else 0.0
+
+        # Rolling accuracy from recent window
+        window = list(prediction_stats["recent_accuracy_window"])
+        rolling_accuracy = (sum(window) / len(window)) if window else 0.0
+
+        # by_regime with accuracy computed
+        by_regime = {}
+        for regime, data in prediction_stats["by_regime"].items():
+            t = data["total"]
+            c = data["correct"]
+            by_regime[regime] = {"total": t, "correct": c, "accuracy": round(c / t, 4) if t > 0 else 0.0}
+
+        # by_horizon with accuracy computed
+        by_horizon = {}
+        for horizon, data in prediction_stats["by_horizon"].items():
+            t = data["total"]
+            c = data["correct"]
+            by_horizon[horizon] = {"total": t, "correct": c, "accuracy": round(c / t, 4) if t > 0 else 0.0}
+
+        # by_direction with accuracy computed
+        by_direction = {}
+        for direction, data in prediction_stats["by_direction"].items():
+            t = data["total"]
+            c = data["correct"]
+            by_direction[direction] = {"total": t, "correct": c, "accuracy": round(c / t, 4) if t > 0 else 0.0}
+
+        # Calibration curve (10 bins)
+        calibration_curve = []
+        for i in range(10):
+            bin_key = f"{i * 10}-{(i + 1) * 10}%"
+            bin_data = prediction_stats["calibration_bins"].get(bin_key)
+            if bin_data and bin_data["count"] > 0:
+                calibration_curve.append({
+                    "bin": bin_key,
+                    "bin_center": round((i * 10 + (i + 1) * 10) / 200, 2),
+                    "avg_predicted_confidence": round(bin_data["predicted_sum"] / bin_data["count"], 3),
+                    "actual_accuracy": round(bin_data["actual_correct"] / bin_data["count"], 3),
+                    "count": bin_data["count"],
+                })
+            else:
+                calibration_curve.append({
+                    "bin": bin_key,
+                    "bin_center": round((i * 10 + (i + 1) * 10) / 200, 2),
+                    "avg_predicted_confidence": 0.0,
+                    "actual_accuracy": 0.0,
+                    "count": 0,
+                })
+
+        # Model agreement percentages
+        ma = prediction_stats["model_agreement"]
+        ma_total = ma["total"] if ma["total"] > 0 else 1
+        model_agreement = {
+            "4_agree_pct": round(ma["4_agree"] / ma_total * 100, 1),
+            "3_agree_pct": round(ma["3_agree"] / ma_total * 100, 1),
+            "2_agree_pct": round(ma["2_agree"] / ma_total * 100, 1),
+            "total": ma["total"],
+        }
+
+    return {
+        "total_predictions": prediction_stats["total_predictions"],
+        "total_evaluated": total_eval,
+        "correct": correct,
+        "overall_accuracy": round(overall_accuracy, 4),
+        "rolling_accuracy_200": round(rolling_accuracy, 4),
+        "by_regime": by_regime,
+        "by_horizon": by_horizon,
+        "by_direction": by_direction,
+        "calibration_curve": calibration_curve,
+        "model_agreement": model_agreement,
+    }
+
+
+@app.get("/api/predictions/outcomes")
+def get_prediction_outcomes(
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Recent evaluated prediction outcomes, newest first."""
+    with _lock:
+        items = list(prediction_outcomes)[-limit:]
+    items.reverse()
+    return items
+
+
+@app.get("/api/backtesting/results")
+def get_backtesting_results():
+    """Load the most recent backtesting results JSON from backtesting/results/ directory."""
+    results_dir = Path(__file__).resolve().parent.parent / "backtesting" / "results"
+    if not results_dir.exists():
+        return {"status": "no_results", "message": "No backtesting results directory found."}
+
+    json_files = sorted(results_dir.glob("*.json"))
+    if not json_files:
+        return {"status": "no_results", "message": "No backtesting result files found."}
+
+    latest = json_files[-1]
+    try:
+        with open(latest) as f:
+            data = json.load(f)
+        return {"status": "ok", "file": latest.name, "results": data}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 # ---------------------------------------------------------------------------
@@ -2522,6 +2768,8 @@ async def startup():
     t1.start()
     t2 = threading.Thread(target=_consume_signals, daemon=True)
     t2.start()
+    t3 = threading.Thread(target=_consume_predictions, daemon=True)
+    t3.start()
     log.info("Sentinel API started — Kafka consumers running")
 
 

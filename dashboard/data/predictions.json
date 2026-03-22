@@ -1,0 +1,205 @@
+[
+  {
+    "prediction_id": "pred-001",
+    "ticker": "AAPL",
+    "direction": "bullish",
+    "magnitude": 1.2,
+    "confidence": 0.72,
+    "raw_score": 0.45,
+    "time_horizon_hours": 24,
+    "decay_rate": 24,
+    "regime": "trending_up",
+    "contributing_signals": [
+      {"source": "rule_based", "signal_type": "bullish", "value": 0.42, "weight": 0.35},
+      {"source": "xgboost", "signal_type": "bullish", "value": 0.51, "weight": 0.3},
+      {"source": "prophet", "signal_type": "bullish", "value": 0.38, "weight": 0.2}
+    ],
+    "model_version": "ensemble_v1",
+    "created_at": "2026-03-21T18:00:00Z",
+    "expires_at": "2026-03-22T18:00:00Z",
+    "outcome": null
+  },
+  {
+    "prediction_id": "pred-002",
+    "ticker": "TSLA",
+    "direction": "bearish",
+    "magnitude": -2.1,
+    "confidence": 0.81,
+    "raw_score": -0.62,
+    "time_horizon_hours": 24,
+    "decay_rate": 24,
+    "regime": "high_vol_breakout",
+    "contributing_signals": [
+      {"source": "rule_based", "signal_type": "bearish", "value": -0.55, "weight": 0.35},
+      {"source": "xgboost", "signal_type": "bearish", "value": -0.68, "weight": 0.3},
+      {"source": "prophet", "signal_type": "bearish", "value": -0.49, "weight": 0.2},
+      {"source": "finbert", "signal_type": "bearish", "value": -0.71, "weight": 0.15}
+    ],
+    "model_version": "ensemble_v1",
+    "created_at": "2026-03-21T17:30:00Z",
+    "expires_at": "2026-03-22T17:30:00Z",
+    "outcome": "correct"
+  },
+  {
+    "prediction_id": "pred-003",
+    "ticker": "NVDA",
+    "direction": "bullish",
+    "magnitude": 0.8,
+    "confidence": 0.65,
+    "raw_score": 0.33,
+    "time_horizon_hours": 72,
+    "decay_rate": 48,
+    "regime": "trending_up",
+    "contributing_signals": [
+      {"source": "rule_based", "signal_type": "bullish", "value": 0.31, "weight": 0.35},
+      {"source": "xgboost", "signal_type": "bullish", "value": 0.39, "weight": 0.3},
+      {"source": "finbert", "signal_type": "neutral", "value": 0.05, "weight": 0.15}
+    ],
+    "model_version": "ensemble_v1",
+    "created_at": "2026-03-21T16:00:00Z",
+    "expires_at": "2026-03-24T16:00:00Z",
+    "outcome": null
+  },
+  {
+    "prediction_id": "pred-004",
+    "ticker": "MSFT",
+    "direction": "neutral",
+    "magnitude": 0.1,
+    "confidence": 0.42,
+    "raw_score": 0.04,
+    "time_horizon_hours": 24,
+    "decay_rate": 24,
+    "regime": "range_bound",
+    "contributing_signals": [
+      {"source": "rule_based", "signal_type": "neutral", "value": 0.02, "weight": 0.35},
+      {"source": "xgboost", "signal_type": "bullish", "value": 0.18, "weight": 0.3},
+      {"source": "prophet", "signal_type": "bearish", "value": -0.12, "weight": 0.2}
+    ],
+    "model_version": "ensemble_v1",
+    "created_at": "2026-03-21T15:00:00Z",
+    "expires_at": "2026-03-22T15:00:00Z",
+    "outcome": "incorrect"
+  },
+  {
+    "prediction_id": "pred-005",
+    "ticker": "SPY",
+    "direction": "bullish",
+    "magnitude": 0.5,
+    "confidence": 0.58,
+    "raw_score": 0.22,
+    "time_horizon_hours": 168,
+    "decay_rate": 72,
+    "regime": "trending_up",
+    "contributing_signals": [
+      {"source": "rule_based", "signal_type": "bullish", "value": 0.25, "weight": 0.35},
+      {"source": "xgboost", "signal_type": "bullish", "value": 0.20, "weight": 0.3},
+      {"source": "prophet", "signal_type": "bullish", "value": 0.19, "weight": 0.2},
+      {"source": "finbert", "signal_type": "neutral", "value": 0.08, "weight": 0.15}
+    ],
+    "model_version": "ensemble_v1",
+    "created_at": "2026-03-21T14:00:00Z",
+    "expires_at": "2026-03-28T14:00:00Z",
+    "outcome": null
+  },
+  {
+    "prediction_id": "pred-006",
+    "ticker": "TSLA",
+    "direction": "bullish",
+    "magnitude": 1.8,
+    "confidence": 0.85,
+    "raw_score": 0.71,
+    "time_horizon_hours": 4,
+    "decay_rate": 4,
+    "regime": "high_vol_breakout",
+    "contributing_signals": [
+      {"source": "rule_based", "signal_type": "bullish", "value": 0.65, "weight": 0.35},
+      {"source": "xgboost", "signal_type": "bullish", "value": 0.78, "weight": 0.3},
+      {"source": "prophet", "signal_type": "bullish", "value": 0.59, "weight": 0.2},
+      {"source": "finbert", "signal_type": "bullish", "value": 0.82, "weight": 0.15}
+    ],
+    "model_version": "ensemble_v1",
+    "created_at": "2026-03-21T12:00:00Z",
+    "expires_at": "2026-03-21T16:00:00Z",
+    "outcome": "correct"
+  },
+  {
+    "prediction_id": "pred-007",
+    "ticker": "NVDA",
+    "direction": "bearish",
+    "magnitude": -0.9,
+    "confidence": 0.53,
+    "raw_score": -0.28,
+    "time_horizon_hours": 24,
+    "decay_rate": 24,
+    "regime": "range_bound",
+    "contributing_signals": [
+      {"source": "rule_based", "signal_type": "bearish", "value": -0.22, "weight": 0.35},
+      {"source": "xgboost", "signal_type": "bearish", "value": -0.31, "weight": 0.3}
+    ],
+    "model_version": "ensemble_v1",
+    "created_at": "2026-03-21T10:00:00Z",
+    "expires_at": "2026-03-22T10:00:00Z",
+    "outcome": "incorrect"
+  },
+  {
+    "prediction_id": "pred-008",
+    "ticker": "AAPL",
+    "direction": "bearish",
+    "magnitude": -1.5,
+    "confidence": 0.74,
+    "raw_score": -0.52,
+    "time_horizon_hours": 72,
+    "decay_rate": 48,
+    "regime": "trending_down",
+    "contributing_signals": [
+      {"source": "rule_based", "signal_type": "bearish", "value": -0.48, "weight": 0.35},
+      {"source": "xgboost", "signal_type": "bearish", "value": -0.56, "weight": 0.3},
+      {"source": "prophet", "signal_type": "bearish", "value": -0.44, "weight": 0.2},
+      {"source": "finbert", "signal_type": "bearish", "value": -0.61, "weight": 0.15}
+    ],
+    "model_version": "ensemble_v1",
+    "created_at": "2026-03-20T22:00:00Z",
+    "expires_at": "2026-03-23T22:00:00Z",
+    "outcome": "correct"
+  },
+  {
+    "prediction_id": "pred-009",
+    "ticker": "SPY",
+    "direction": "bearish",
+    "magnitude": -0.4,
+    "confidence": 0.48,
+    "raw_score": -0.15,
+    "time_horizon_hours": 1,
+    "decay_rate": 1,
+    "regime": "range_bound",
+    "contributing_signals": [
+      {"source": "rule_based", "signal_type": "bearish", "value": -0.12, "weight": 0.35},
+      {"source": "xgboost", "signal_type": "neutral", "value": -0.03, "weight": 0.3},
+      {"source": "prophet", "signal_type": "bearish", "value": -0.18, "weight": 0.2}
+    ],
+    "model_version": "ensemble_v1",
+    "created_at": "2026-03-20T20:00:00Z",
+    "expires_at": "2026-03-20T21:00:00Z",
+    "outcome": "correct"
+  },
+  {
+    "prediction_id": "pred-010",
+    "ticker": "MSFT",
+    "direction": "bullish",
+    "magnitude": 1.0,
+    "confidence": 0.67,
+    "raw_score": 0.38,
+    "time_horizon_hours": 24,
+    "decay_rate": 24,
+    "regime": "trending_up",
+    "contributing_signals": [
+      {"source": "rule_based", "signal_type": "bullish", "value": 0.35, "weight": 0.35},
+      {"source": "xgboost", "signal_type": "bullish", "value": 0.42, "weight": 0.3},
+      {"source": "finbert", "signal_type": "bullish", "value": 0.30, "weight": 0.15}
+    ],
+    "model_version": "ensemble_v1",
+    "created_at": "2026-03-20T18:00:00Z",
+    "expires_at": "2026-03-21T18:00:00Z",
+    "outcome": "incorrect"
+  }
+]

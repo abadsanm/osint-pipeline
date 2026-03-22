@@ -96,3 +96,29 @@ export function usePulseCharts(timeframe?: string) {
   const endpoint = qs ? `/pulse/charts?${qs}` : "/pulse/charts";
   return useApiData<PulseChartsData>(endpoint, EMPTY_PULSE_CHARTS, 10000);
 }
+
+export function usePredictions(limit = 50, ticker?: string) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (ticker) params.set("ticker", ticker);
+  return useApiData(`/predictions?${params}`, [], 3000);
+}
+
+export function usePredictionStats() {
+  return useApiData("/predictions/stats", {
+    total_predictions: 0, total_evaluated: 0, overall_accuracy: 0,
+    rolling_accuracy_200: 0,
+    by_regime: {} as Record<string, {total: number; correct: number; accuracy: number}>,
+    by_horizon: {} as Record<string, {total: number; correct: number; accuracy: number}>,
+    by_direction: {} as Record<string, {total: number; correct: number; accuracy: number}>,
+    calibration_curve: [] as Array<{bin: string; bin_center: number; avg_predicted_confidence: number; actual_accuracy: number; count: number}>,
+    model_agreement: {"4_agree_pct": 0, "3_agree_pct": 0, "2_agree_pct": 0},
+  }, 5000);
+}
+
+export function useBacktestResults() {
+  return useApiData("/backtesting/results", {status: "loading"}, 30000);
+}
+
+export function usePredictionOutcomes(limit = 50) {
+  return useApiData(`/predictions/outcomes?limit=${limit}`, [], 5000);
+}

@@ -1,7 +1,11 @@
 """Backtesting metrics — evaluate prediction quality."""
 
+import json
 import logging
+import os
 from collections import defaultdict
+from datetime import datetime, timezone
+from pathlib import Path
 
 import numpy as np
 
@@ -172,7 +176,81 @@ def signal_decay_analysis(results: list[dict]) -> list[dict]:
     )
 
 
-def print_summary(results: list[dict]) -> None:
+def save_results(
+    results: list[dict],
+    feature_importance: list[dict] | None = None,
+) -> str | None:
+    """Save computed metrics to a timestamped JSON file in backtesting/results/.
+
+    Returns the file path on success, or None on failure.
+    """
+    if not results:
+        return None
+
+    results_dir = Path(__file__).resolve().parent / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    now = datetime.now(timezone.utc)
+    timestamp_str = now.strftime("%Y%m%dT%H%M%SZ")
+
+    tickers = sorted(set(r.get("ticker", "") for r in results))
+    horizons = sorted(set(r.get("horizon", 0) for r in results))
+
+    # Compute date range from predictions
+    dates = []
+    for r in results:
+        pred = r.get("prediction")
+        if pred and hasattr(pred, "created_at") and pred.created_at:
+            dates.append(str(pred.created_at)[:10])
+        elif isinstance(r.get("timestamp"), str):
+            dates.append(r["timestamp"][:10])
+    date_range = {"start": min(dates) if dates else "", "end": max(dates) if dates else ""}
+
+    # by_regime with accuracy
+    regime_data = win_rate_by_regime(results)
+    by_regime = {}
+    for regime, wr in regime_data.items():
+        count = sum(1 for r in results if r.get("regime") == regime)
+        correct_count = sum(1 for r in results if r.get("regime") == regime and r["prediction"].outcome == "correct")
+        by_regime[regime] = {"total": count, "correct": correct_count, "accuracy": round(wr, 4)}
+
+    # by_horizon with accuracy
+    decay = signal_decay_analysis(results)
+    by_horizon = {}
+    for d in decay:
+        h = str(d["horizon"])
+        by_horizon[h] = {"total": d["count"], "accuracy": d["accuracy"]}
+
+    payload = {
+        "timestamp": now.isoformat(),
+        "accuracy": round(accuracy(results), 4),
+        "precision_at_70": round(precision_at_threshold(results, 0.7), 4),
+        "sharpe_ratio": round(sharpe_ratio(results), 4),
+        "profit_factor": round(profit_factor(results), 4),
+        "max_drawdown": round(max_drawdown(results), 2),
+        "calibration_curve": calibration_curve(results),
+        "by_regime": by_regime,
+        "by_horizon": by_horizon,
+        "total_predictions": len(results),
+        "tickers": tickers,
+        "date_range": date_range,
+    }
+
+    if feature_importance:
+        payload["feature_importance"] = feature_importance
+
+    file_path = results_dir / f"{timestamp_str}.json"
+    try:
+        with open(file_path, "w") as f:
+            json.dump(payload, f, indent=2, default=str)
+        log.info("Backtesting results saved to %s", file_path)
+        return str(file_path)
+    except Exception as e:
+        log.error("Failed to save backtesting results: %s", e)
+        return None
+
+
+def print_summary(results: list[dict], save: bool = True, feature_importance: list[dict] | None = None) -> None:
     """Print a formatted summary of all backtesting metrics."""
     if not results:
         print("No results to summarize.")
@@ -227,3 +305,9 @@ def print_summary(results: list[dict]) -> None:
         print(f"  {c['bin_center']:>6.2f}  {c['predicted_confidence']:>10.3f}  {c['actual_accuracy']:>8.3f}  {c['count']:>6d}")
 
     print("\n" + "=" * 60)
+
+    # Save results to JSON file
+    if save:
+        saved_path = save_results(results, feature_importance=feature_importance)
+        if saved_path:
+            print(f"\nResults saved to: {saved_path}")

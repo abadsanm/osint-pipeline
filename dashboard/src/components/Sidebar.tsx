@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, TrendingUp, Lightbulb, Settings } from "lucide-react";
+import { Home, TrendingUp, Lightbulb, Target, FlaskConical, Settings } from "lucide-react";
 
 const navItems = [
-  { href: "/", icon: Home, label: "Pulse" },
-  { href: "/alpha/TSLA", icon: TrendingUp, label: "Alpha" },
-  { href: "/innovation", icon: Lightbulb, label: "Innovation" },
-  { href: "/settings", icon: Settings, label: "Settings" },
+  { href: "/", icon: Home, label: "Pulse", mobileLabel: "Pulse" },
+  { href: "/alpha/TSLA", icon: TrendingUp, label: "Alpha", mobileLabel: "Alpha" },
+  { href: "/innovation", icon: Lightbulb, label: "Innovation", mobileLabel: "Innovation" },
+  { href: "/predictions", icon: Target, label: "Predictions", mobileLabel: "Predict" },
+  { href: "/backtesting", icon: FlaskConical, label: "Backtesting", mobileLabel: "Backtest" },
+  { href: "/settings", icon: Settings, label: "Settings", mobileLabel: "Settings" },
 ];
 
 export default function Sidebar() {
@@ -64,7 +66,7 @@ export default function Sidebar() {
               }`}
             >
               <Icon size={20} />
-              <span className="text-[10px] leading-tight font-medium">{item.label}</span>
+              <span className="text-[10px] leading-tight font-medium">{item.mobileLabel}</span>
             </Link>
           );
         })}

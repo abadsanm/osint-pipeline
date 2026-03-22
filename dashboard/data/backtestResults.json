@@ -1,0 +1,62 @@
+{
+  "status": "ok",
+  "results": {
+    "timestamp": "2026-03-20T12:00:00Z",
+    "accuracy": 0.623,
+    "precision_at_70": 0.71,
+    "sharpe_ratio": 1.42,
+    "profit_factor": 1.85,
+    "max_drawdown": -12.3,
+    "total_predictions": 4250,
+    "date_range": {"start": "2024-01-01", "end": "2025-03-01"},
+    "tickers": ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "TSLA", "META", "GOOGL", "AMZN", "JPM"],
+    "calibration_curve": [
+      {"bin": "0-10%", "bin_center": 0.05, "avg_predicted_confidence": 0.08, "actual_accuracy": 0.12, "count": 120},
+      {"bin": "10-20%", "bin_center": 0.15, "avg_predicted_confidence": 0.16, "actual_accuracy": 0.21, "count": 185},
+      {"bin": "20-30%", "bin_center": 0.25, "avg_predicted_confidence": 0.26, "actual_accuracy": 0.29, "count": 260},
+      {"bin": "30-40%", "bin_center": 0.35, "avg_predicted_confidence": 0.36, "actual_accuracy": 0.37, "count": 380},
+      {"bin": "40-50%", "bin_center": 0.45, "avg_predicted_confidence": 0.46, "actual_accuracy": 0.47, "count": 520},
+      {"bin": "50-60%", "bin_center": 0.55, "avg_predicted_confidence": 0.56, "actual_accuracy": 0.55, "count": 680},
+      {"bin": "60-70%", "bin_center": 0.65, "avg_predicted_confidence": 0.65, "actual_accuracy": 0.63, "count": 750},
+      {"bin": "70-80%", "bin_center": 0.75, "avg_predicted_confidence": 0.74, "actual_accuracy": 0.71, "count": 620},
+      {"bin": "80-90%", "bin_center": 0.85, "avg_predicted_confidence": 0.84, "actual_accuracy": 0.79, "count": 450},
+      {"bin": "90-100%", "bin_center": 0.95, "avg_predicted_confidence": 0.93, "actual_accuracy": 0.86, "count": 285}
+    ],
+    "by_regime": {
+      "trending_up": {"total": 1200, "correct": 856, "accuracy": 0.713},
+      "trending_down": {"total": 800, "correct": 504, "accuracy": 0.630},
+      "range_bound": {"total": 1500, "correct": 811, "accuracy": 0.541},
+      "high_vol_breakout": {"total": 750, "correct": 442, "accuracy": 0.589}
+    },
+    "by_horizon": {
+      "1": {"total": 850, "correct": 468, "accuracy": 0.551},
+      "4": {"total": 850, "correct": 504, "accuracy": 0.593},
+      "24": {"total": 850, "correct": 550, "accuracy": 0.647},
+      "72": {"total": 850, "correct": 580, "accuracy": 0.682},
+      "168": {"total": 850, "correct": 519, "accuracy": 0.611}
+    },
+    "feature_importance": [
+      {"feature": "rsi", "importance": 0.182},
+      {"feature": "macd_hist", "importance": 0.156},
+      {"feature": "sentiment_score", "importance": 0.143},
+      {"feature": "bb_pctb", "importance": 0.128},
+      {"feature": "svc_value", "importance": 0.098},
+      {"feature": "sma20_distance", "importance": 0.087},
+      {"feature": "correlation_confidence", "importance": 0.072},
+      {"feature": "volume_zscore", "importance": 0.065},
+      {"feature": "source_count", "importance": 0.069}
+    ],
+    "per_ticker": [
+      {"ticker": "SPY", "accuracy": 0.654, "sharpe": 1.52, "trades": 425, "win_rate": 0.654, "avg_return": 0.12},
+      {"ticker": "QQQ", "accuracy": 0.638, "sharpe": 1.38, "trades": 425, "win_rate": 0.638, "avg_return": 0.15},
+      {"ticker": "AAPL", "accuracy": 0.641, "sharpe": 1.45, "trades": 425, "win_rate": 0.641, "avg_return": 0.11},
+      {"ticker": "MSFT", "accuracy": 0.629, "sharpe": 1.36, "trades": 425, "win_rate": 0.629, "avg_return": 0.09},
+      {"ticker": "NVDA", "accuracy": 0.672, "sharpe": 1.61, "trades": 425, "win_rate": 0.672, "avg_return": 0.22},
+      {"ticker": "TSLA", "accuracy": 0.581, "sharpe": 1.08, "trades": 425, "win_rate": 0.581, "avg_return": 0.31},
+      {"ticker": "META", "accuracy": 0.618, "sharpe": 1.29, "trades": 425, "win_rate": 0.618, "avg_return": 0.14},
+      {"ticker": "GOOGL", "accuracy": 0.632, "sharpe": 1.41, "trades": 425, "win_rate": 0.632, "avg_return": 0.10},
+      {"ticker": "AMZN", "accuracy": 0.609, "sharpe": 1.22, "trades": 425, "win_rate": 0.609, "avg_return": 0.13},
+      {"ticker": "JPM", "accuracy": 0.597, "sharpe": 1.15, "trades": 425, "win_rate": 0.597, "avg_return": 0.08}
+    ]
+  }
+}
