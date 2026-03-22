@@ -2384,8 +2384,12 @@ async def get_alpha(ticker: str):
                 latest_snapshot = ml_data[-1]
                 prediction = ml_scorer.predict(latest_snapshot)
                 if prediction:
+                    # Blend ML score with rule-based score
+                    rule_score = score_data.get("overall", 0) or 0
+                    blended = ml_scorer.blend_with_rule_based(rule_score, prediction, blend_weight=0.4)
                     ml_prediction = {
                         **prediction,
+                        "blended_score": round(blended, 4),
                         "snapshot_time": latest_snapshot.get("timestamp"),
                         "features_used": len(ml_scorer._feature_names),
                         "training_stats": ml_scorer.training_stats,

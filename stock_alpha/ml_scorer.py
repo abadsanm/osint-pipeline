@@ -557,9 +557,15 @@ class MLScorer:
             ensemble = [(m, 1.0) for m, _ in ensemble]
 
         proba_sum = None
+        n_classes = 3  # down, flat, up
         for model, weight in ensemble:
             try:
                 proba = model.predict_proba(X)
+                # Pad to n_classes if model outputs fewer
+                if proba.shape[1] < n_classes:
+                    padded = np.zeros((proba.shape[0], n_classes))
+                    padded[:, :proba.shape[1]] = proba
+                    proba = padded
                 if proba_sum is None:
                     proba_sum = proba * (weight / total_weight)
                 else:
@@ -798,6 +804,17 @@ class MLScorer:
                 else proba_1d
             )
 
+        # Ensure proba arrays have 3 elements (pad with zeros if model outputs fewer)
+        def _pad_proba(proba, n_classes=3):
+            if len(proba) >= n_classes:
+                return proba
+            padded = np.zeros(n_classes)
+            padded[:len(proba)] = proba
+            return padded
+
+        proba_1d = _pad_proba(proba_1d)
+        proba_5d = _pad_proba(proba_5d)
+
         dir_1d_idx = int(np.argmax(proba_1d))
         dir_5d_idx = int(np.argmax(proba_5d))
 
@@ -819,11 +836,19 @@ class MLScorer:
         magnitude_scale = 1.0 + min(abs(predicted_return_1d), 5.0) / 5.0  # 1..2x
         ml_score = max(-1.0, min(1.0, raw_ml * magnitude_scale))
 
+        prob_down_5d = float(proba_5d[DIRECTION_MAP["down"]])
+        prob_flat_1d = float(proba_1d[DIRECTION_MAP["flat"]])
+        prob_flat_5d = float(proba_5d[DIRECTION_MAP["flat"]])
+
         return {
             "direction_1d": DIRECTION_INV[dir_1d_idx],
             "direction_5d": DIRECTION_INV[dir_5d_idx],
             "probability_up_1d": prob_up_1d,
+            "probability_down_1d": prob_down_1d,
+            "probability_flat_1d": prob_flat_1d,
             "probability_up_5d": prob_up_5d,
+            "probability_down_5d": prob_down_5d,
+            "probability_flat_5d": prob_flat_5d,
             "predicted_return_1d": predicted_return_1d,
             "confidence": confidence,
             "ml_score": ml_score,
