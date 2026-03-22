@@ -20,7 +20,7 @@ export default function ChatPanel({ open, onClose }: ChatPanelProps) {
     {
       id: "welcome",
       role: "assistant",
-      text: "Sentinel AI assistant ready. Ask about any ticker, signal, or market trend.",
+      text: "Sentinel AI ready. Ask me about any ticker (e.g. 'What is RKLB sentiment?'), market trends, or pipeline data. I have access to real-time OSINT signals, price data, technicals, and ML forecasts.",
       timestamp: "",
     },
   ]);
@@ -41,9 +41,11 @@ export default function ChatPanel({ open, onClose }: ChatPanelProps) {
     }
   }, [messages]);
 
-  const handleSend = () => {
+  const [loading, setLoading] = useState(false);
+
+  const handleSend = async () => {
     const trimmed = input.trim();
-    if (!trimmed) return;
+    if (!trimmed || loading) return;
 
     const userMsg: Message = {
       id: `user-${Date.now()}`,
@@ -52,15 +54,53 @@ export default function ChatPanel({ open, onClose }: ChatPanelProps) {
       timestamp: new Date().toLocaleTimeString(),
     };
 
-    const assistantMsg: Message = {
-      id: `asst-${Date.now()}`,
+    // Show user message + loading indicator
+    const loadingMsg: Message = {
+      id: `loading-${Date.now()}`,
       role: "assistant",
-      text: "Analysis capabilities coming soon. This is a local-only chat for analyst collaboration.",
-      timestamp: new Date().toLocaleTimeString(),
+      text: "Analyzing...",
+      timestamp: "",
     };
 
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
+    setMessages((prev) => [...prev, userMsg, loadingMsg]);
     setInput("");
+    setLoading(true);
+
+    try {
+      const res = await fetch("http://localhost:8000/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: trimmed }),
+      });
+      const data = await res.json();
+
+      setMessages((prev) => {
+        const filtered = prev.filter((m) => !m.id.startsWith("loading-"));
+        return [
+          ...filtered,
+          {
+            id: `asst-${Date.now()}`,
+            role: "assistant",
+            text: data.response || "No response received.",
+            timestamp: new Date().toLocaleTimeString(),
+          },
+        ];
+      });
+    } catch {
+      setMessages((prev) => {
+        const filtered = prev.filter((m) => !m.id.startsWith("loading-"));
+        return [
+          ...filtered,
+          {
+            id: `asst-${Date.now()}`,
+            role: "assistant",
+            text: "Could not reach Sentinel AI. Make sure the API server is running.",
+            timestamp: new Date().toLocaleTimeString(),
+          },
+        ];
+      });
+    }
+    setLoading(false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

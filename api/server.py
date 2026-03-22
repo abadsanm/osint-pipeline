@@ -2893,6 +2893,290 @@ Current sentiment is {sentiment_label} at {sentiment:.0%}. {"This suggests posit
 
 
 # ---------------------------------------------------------------------------
+# Chat (context-aware AI assistant)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/chat")
+async def chat(request: dict):
+    """Context-aware chat powered by Claude. Gathers pipeline data for the
+    user's question and responds with analysis grounded in real data."""
+    user_message = request.get("message", "")
+    if not user_message.strip():
+        return {"response": "Please ask a question."}
+
+    # Gather relevant pipeline context
+    context_parts = []
+
+    # Ticker aliases for entity lookup
+    _chat_aliases = {
+        "AAPL": ["APPLE"], "TSLA": ["TESLA"], "NVDA": ["NVIDIA"],
+        "MSFT": ["MICROSOFT"], "AMZN": ["AMAZON"], "GOOGL": ["GOOGLE"],
+        "META": ["META PLATFORMS"], "JPM": ["JP MORGAN"], "XOM": ["EXXON"],
+        "BTC": ["BITCOIN"], "ETH": ["ETHEREUM"], "RKLB": ["ROCKET LAB"],
+    }
+
+    # 1. Check if user mentions a ticker/entity — pull alpha data
+    import re
+    # Extract potential tickers (all-caps 2-5 letters) but filter common words
+    _CHAT_STOP_WORDS = {
+        "THE", "AND", "FOR", "NOT", "ARE", "BUT", "WAS", "HAS", "ALL", "ANY",
+        "NEW", "NOW", "OLD", "OUR", "YOU", "HER", "HIS", "WHO", "HOW", "WHY",
+        "CAN", "MAY", "LET", "SAY", "GET", "GOT", "PUT", "RUN", "SET", "USE",
+        "WHAT", "WHEN", "WHERE", "WHICH", "WITH", "FROM", "ABOUT", "INTO",
+        "BEEN", "SOME", "THAN", "THEM", "THEN", "THIS", "THAT", "JUST",
+        "WILL", "DOES", "MAKE", "LIKE", "HAVE", "BEEN", "MORE", "ALSO",
+        "EACH", "MUCH", "MOST", "ONLY", "OVER", "SUCH", "TAKE", "THAN",
+        "TELL", "VERY", "WELL", "WHAT", "WHEN", "SHOW", "GIVE", "KEEP",
+        "PRICE", "STOCK", "MARKET", "TRADE", "LONG", "SHORT", "SELL", "BUY",
+    }
+    raw_tickers = re.findall(r'\b([A-Z]{2,5})\b', user_message.upper())
+    tickers_mentioned = [t for t in raw_tickers if t not in _CHAT_STOP_WORDS]
+    # Also check for $TICKER pattern
+    dollar_tickers = re.findall(r'\$([A-Z]{1,5})\b', user_message.upper())
+    for dt in dollar_tickers:
+        if dt not in tickers_mentioned:
+            tickers_mentioned.insert(0, dt)
+    ticker_data = {}
+
+    for t in tickers_mentioned[:3]:  # Limit to 3 tickers
+        with _lock:
+            # Search aliases
+            alias_set = {t}
+            for alias in _chat_aliases.get(t, []):
+                alias_set.add(alias.upper())
+            for eid, em in entity_mentions.items():
+                if eid.upper() in alias_set:
+                    vol = em.get("volume", 0)
+                    sent = em["sentiment_sum"] / em["sentiment_count"] if em.get("sentiment_count", 0) > 0 else None
+                    sources = dict(em.get("sources", {})) if isinstance(em.get("sources"), dict) else {}
+                    ticker_data[t] = {
+                        "volume": vol, "sentiment": sent, "sources": sources,
+                        "keywords": em.get("keywords", [])[:5],
+                    }
+                    break
+
+    if ticker_data:
+        for t, td in ticker_data.items():
+            sent_str = f"{td['sentiment']:.0%}" if td['sentiment'] else "unknown"
+            context_parts.append(
+                f"Pipeline data for {t}: {td['volume']} mentions, "
+                f"sentiment {sent_str}, sources: {', '.join(td['sources'].keys())}, "
+                f"keywords: {', '.join(td['keywords'])}"
+            )
+
+    # 2. Try to get alpha data (price, technicals) — with timeout
+    import concurrent.futures
+    def _fetch_price(t):
+        try:
+            info, _hist = _get_yf_data(t)
+            if info:
+                price = info.get("currentPrice") or info.get("regularMarketPrice")
+                prev = info.get("previousClose")
+                change = round((price - prev) / prev * 100, 2) if price and prev else None
+                return f"Market data for {t}: price ${price}, change {change}%, 52w range ${info.get('fiftyTwoWeekLow')}-${info.get('fiftyTwoWeekHigh')}"
+        except Exception:
+            return None
+        return None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        futures = {executor.submit(_fetch_price, t): t for t in tickers_mentioned[:2]}
+        for future in concurrent.futures.as_completed(futures, timeout=8):
+            try:
+                result = future.result(timeout=5)
+                if result:
+                    context_parts.append(result)
+            except Exception:
+                pass
+
+    # 3. ML prediction if available
+    for t in tickers_mentioned[:2]:
+        try:
+            from stock_alpha.ml_scorer import MLScorer
+            from stock_alpha.feature_store import FeatureStore
+            scorer = MLScorer()
+            if scorer.is_trained:
+                store = FeatureStore()
+                data = store.get_training_data(ticker=t)
+                if data:
+                    pred = scorer.predict(data[-1])
+                    if pred:
+                        context_parts.append(
+                            f"ML forecast for {t}: {pred['direction_1d']} (1D), "
+                            f"{pred['direction_5d']} (5D), confidence {pred['confidence']:.0%}, "
+                            f"ML score {pred['ml_score']:.2f}"
+                        )
+        except Exception:
+            pass
+
+    # 4. Pipeline stats
+    context_parts.append(
+        f"Pipeline stats: {pipeline_stats['total_ingested']:,} docs ingested, "
+        f"{pipeline_stats['total_normalized']:,} normalized, "
+        f"{pipeline_stats['total_correlated']:,} correlated, "
+        f"{len(entity_mentions):,} entities tracked"
+    )
+
+    context = "\n".join(context_parts) if context_parts else "No specific pipeline data found for this query."
+
+    prompt = f"""You are Sentinel AI, the intelligent assistant for the Sentinel OSINT analytics platform. You have access to real-time pipeline data from multiple sources (HackerNews, Reddit, GitHub, SEC EDGAR, Yahoo Finance, Alpaca, FRED, etc.).
+
+Answer the user's question using the pipeline context below. Be concise, data-driven, and actionable. If you have price/sentiment data, reference specific numbers. If you don't have data for what they're asking, say so and suggest what data sources might help.
+
+PIPELINE CONTEXT:
+{context}
+
+USER QUESTION: {user_message}
+
+Respond in 2-4 paragraphs. Use specific data points from the context. End with a brief actionable recommendation if relevant."""
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic()
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=800,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return {"response": message.content[0].text}
+    except ImportError:
+        return {"response": f"Sentinel AI requires ANTHROPIC_API_KEY. Context gathered:\n\n{context}"}
+    except Exception as e:
+        log.warning("Chat API error: %s", e)
+        return {"response": f"Analysis error. Pipeline context:\n\n{context}"}
+
+
+# ---------------------------------------------------------------------------
+# Watchlist ML Training
+# ---------------------------------------------------------------------------
+
+@app.post("/api/ml/train-watchlist")
+def train_watchlist(request: dict = {}):
+    """Backfill feature store for watchlist tickers and train ML model."""
+    tickers = request.get("tickers", [])
+
+    # Fall back to settings watchlist
+    if not tickers:
+        settings = db.get_settings() if hasattr(db, 'get_settings') else {}
+        tickers = settings.get("watchlist", [
+            "AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META", "SPY", "QQQ"
+        ])
+
+    log.info("Training ML on watchlist: %s", tickers)
+
+    try:
+        import yfinance as yf
+        import pandas as pd
+        import pandas_ta as ta
+        import numpy as np
+        from stock_alpha.feature_store import FeatureStore
+        from stock_alpha.ml_scorer import MLScorer
+
+        store = FeatureStore()
+        total_snapshots = 0
+
+        for ticker in tickers:
+            try:
+                hist = yf.Ticker(ticker).history(period="6mo")
+                if hist is None or hist.empty:
+                    continue
+                hist.columns = [c.lower().replace(" ", "_") for c in hist.columns]
+
+                hist["rsi"] = ta.rsi(hist["close"], length=14)
+                macd = ta.macd(hist["close"])
+                if macd is not None:
+                    for col in macd.columns:
+                        if col.startswith("MACDh"):
+                            hist["macd_hist"] = macd[col]
+                bb = ta.bbands(hist["close"])
+                if bb is not None:
+                    bb_cols = {c[:3]: c for c in bb.columns}
+                    if "BBL" in bb_cols and "BBU" in bb_cols:
+                        bw = bb[bb_cols["BBU"]] - bb[bb_cols["BBL"]]
+                        hist["bb_pctb"] = (hist["close"] - bb[bb_cols["BBL"]]) / bw.replace(0, float("nan"))
+                hist["sma_20"] = ta.sma(hist["close"], length=20)
+                hist["atr"] = ta.atr(hist["high"], hist["low"], hist["close"], length=14)
+
+                count = 0
+                for i in range(30, len(hist)):
+                    row = hist.iloc[i]
+                    if pd.isna(row.get("rsi")):
+                        continue
+                    ts = hist.index[i]
+                    sma20 = row.get("sma_20", 0)
+                    sma20_dist = ((row["close"] - sma20) / sma20 * 100) if sma20 and sma20 > 0 else 0
+                    atr_pct = (row.get("atr", 0) / row["close"] * 100) if row["close"] > 0 and not pd.isna(row.get("atr")) else 0
+
+                    store.snapshot(
+                        ticker=ticker,
+                        timestamp=ts.to_pydatetime().replace(tzinfo=timezone.utc),
+                        price=float(row["close"]),
+                        volume=float(row.get("volume", 0)),
+                        rsi=float(row.get("rsi", 50)),
+                        macd_histogram=float(row.get("macd_hist", 0) if not pd.isna(row.get("macd_hist")) else 0),
+                        bb_pctb=float(row.get("bb_pctb", 0.5) if not pd.isna(row.get("bb_pctb")) else 0.5),
+                        sma20_distance_pct=float(sma20_dist),
+                        atr_pct=float(atr_pct),
+                        sentiment_score=0.5,
+                        svc_value=0.0,
+                        correlation_confidence=0.3,
+                    )
+                    count += 1
+                total_snapshots += count
+                log.info("  %s: %d snapshots", ticker, count)
+            except Exception as e:
+                log.warning("  %s: backfill failed: %s", ticker, e)
+
+        # Fill missing feature columns with defaults
+        import sqlite3
+        defaults = {
+            "price_change_1d_pct": 0.0, "volume_z_score": 0.0, "sma50_distance_pct": 0.0,
+            "obv_slope": 0.0, "sentiment_velocity": 0.0, "sentiment_acceleration": 0.0,
+            "mention_volume": 0, "source_count": 1, "vwap_distance_pct": 0.0,
+            "fvg_bias": 0.0, "volume_profile_poc_distance_pct": 0.0,
+            "cumulative_delta_normalized": 0.0, "imbalance_ratio": 0.0,
+            "insider_score": 0.0, "macro_regime_score": 0.0, "sentiment_dispersion": 0.0,
+            "hour_sin": 0.0, "hour_cos": 1.0, "day_of_week": 2,
+            "news_recency_score": 0.0, "source_weighted_sentiment": 0.5,
+            "volume_momentum": 0.0, "cross_sector_relative": 0.0,
+        }
+        conn = sqlite3.connect(store._db_path)
+        for col, val in defaults.items():
+            try:
+                conn.execute(f"UPDATE snapshots SET {col} = ? WHERE {col} IS NULL", (val,))
+            except Exception:
+                pass
+        conn.commit()
+        conn.close()
+
+        # Label with forward returns
+        store.label_with_returns()
+
+        # Train
+        scorer = MLScorer()
+        stats = store.get_stats()
+        if stats.get("labeled_snapshots", 0) >= 50:
+            result = scorer.train(store)
+            return {
+                "status": "trained",
+                "tickers": tickers,
+                "snapshots": total_snapshots,
+                "labeled": stats.get("labeled_snapshots", 0),
+                "accuracy_1d": result.get("accuracy_1d"),
+                "accuracy_5d": result.get("accuracy_5d"),
+            }
+        else:
+            return {
+                "status": "insufficient_data",
+                "tickers": tickers,
+                "snapshots": total_snapshots,
+                "labeled": stats.get("labeled_snapshots", 0),
+            }
+    except Exception as e:
+        log.error("Watchlist training failed: %s", e, exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+# ---------------------------------------------------------------------------
 # Startup
 # ---------------------------------------------------------------------------
 
