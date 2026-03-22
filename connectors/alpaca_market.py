@@ -40,7 +40,7 @@ class AlpacaConfig:
     API_BASE = "https://data.alpaca.markets/v2"
     API_KEY: str | None = None
     API_SECRET: str | None = None
-    SYMBOLS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA"]
+    SYMBOLS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META"]
     TOPIC = "market.alpaca.bars"
     POLL_INTERVAL = 60
     POLL_INTERVAL_OFF_HOURS = 300
@@ -48,6 +48,19 @@ class AlpacaConfig:
 
 def load_config_from_env():
     """Load configuration from environment variables."""
+    # Load .env file
+    from pathlib import Path
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if env_path.exists():
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, _, v = line.partition("=")
+                    k, v = k.strip(), v.strip()
+                    if v and k not in os.environ:
+                        os.environ[k] = v
+
     api_key = os.environ.get("ALPACA_API_KEY")
     if api_key:
         AlpacaConfig.API_KEY = api_key
@@ -152,11 +165,13 @@ class AlpacaBarPoller:
 
     async def _poll_cycle(self, session: aiohttp.ClientSession):
         url = f"{AlpacaConfig.API_BASE}/stocks/bars"
+        from datetime import timedelta
+        start = (datetime.now(timezone.utc) - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
         params = {
             "symbols": ",".join(AlpacaConfig.SYMBOLS),
             "timeframe": "1Min",
-            "limit": "5",
-            "feed": "iex",
+            "start": start,
+            "limit": "10",
         }
 
         try:
