@@ -147,6 +147,16 @@ const SOURCE_COLORS: Record<string, string> = {
   google_trends: "bg-[#4285F4]",
 };
 
+const SOURCE_DESCRIPTIONS: Record<string, string> = {
+  hacker_news: "HackerNews sentiment reflects the tech-savvy early adopter community. High volume here often signals emerging tech narratives before mainstream media picks them up. Positive HN sentiment on a stock can indicate strong developer/tech community approval.",
+  github: "GitHub activity tracks open-source engagement, repository stars, and developer discussions. Spikes in GitHub mentions often correlate with product launches, security vulnerabilities, or major open-source releases that can move tech stocks.",
+  reddit: "Reddit sentiment aggregates from financial subreddits (r/wallstreetbets, r/stocks, r/investing). High Reddit volume can signal retail investor momentum. Sentiment here tends to be more volatile and emotionally driven than institutional sources.",
+  sec_edgar: "SEC EDGAR data includes insider trading filings (Forms 3/4/5) and congressional trades. This is the highest-reliability source — insiders buying their own stock is a strong bullish signal. Cluster buys (multiple insiders) are especially significant.",
+  news: "Financial news sentiment from Finnhub, Yahoo Finance, and Alpha Vantage. Aggregates professional journalism and analyst coverage. News sentiment tends to be reactive rather than predictive, but extreme sentiment shifts can signal inflection points.",
+  trustpilot: "Trustpilot reviews capture consumer sentiment about the company's products and services. Deteriorating review scores can be an early warning of customer churn, while improving scores may signal product improvements gaining traction.",
+  google_trends: "Google Trends data measures public search interest over time. Rising search volume for a ticker often precedes price movements as retail awareness grows. Sudden spikes can indicate breaking news or viral social media attention.",
+};
+
 // ---------------------------------------------------------------------------
 // Data hook
 // ---------------------------------------------------------------------------
@@ -1075,9 +1085,32 @@ function VolumeAnalysis({
 // ML Prediction Panel
 // ---------------------------------------------------------------------------
 
+const FEATURE_DESCRIPTIONS: Record<string, string> = {
+  rsi: "Relative Strength Index (14-day). Measures momentum on a 0-100 scale. Below 30 = oversold, above 70 = overbought. The model uses RSI to detect mean-reversion opportunities.",
+  macd_histogram: "MACD histogram value. Tracks the difference between the MACD line and its signal line. Positive = bullish momentum, negative = bearish. Histogram shrinking toward zero = momentum weakening.",
+  macd_signal: "MACD signal line. A 9-day EMA of the MACD line. Crossovers between MACD and signal generate buy/sell signals.",
+  bb_pctb: "Bollinger Band %B. Shows where price sits within its volatility envelope (0-1). Below 0.2 = near lower band (oversold), above 0.8 = near upper band (overbought).",
+  sma20: "20-day Simple Moving Average. Short-term trend indicator. Price above SMA20 = short-term bullish, below = bearish.",
+  sma50: "50-day Simple Moving Average. Medium-term trend indicator. Golden cross (SMA20 > SMA50) = bullish trend confirmation.",
+  ema12: "12-day Exponential Moving Average. Faster-reacting trend indicator. Used in MACD calculation.",
+  ema26: "26-day Exponential Moving Average. Slower trend component of MACD.",
+  atr: "Average True Range (14-day). Measures volatility — higher ATR = more volatile price action. Used for position sizing and stop-loss placement.",
+  obv: "On-Balance Volume. Cumulative volume indicator. Rising OBV = accumulation (buying pressure), falling = distribution (selling pressure).",
+  volume: "Trading volume. High volume confirms price moves; low volume suggests weak conviction. Volume spikes often precede trend changes.",
+  sentiment_score: "Aggregate sentiment score from the OSINT pipeline. Combines FinBERT NLP analysis of HackerNews, Reddit, SEC filings, and financial news.",
+  sentiment_volume: "Number of OSINT documents mentioning this ticker. Higher volume = more market attention and potentially more reliable sentiment signal.",
+  svc: "Sentiment Volume Convergence. Measures whether sentiment shift is confirmed by volume change. High SVC = sentiment moving with conviction.",
+  correlation_confidence: "Cross-source signal agreement strength. Higher confidence = more independent data sources agree on the direction.",
+  close: "Closing price. The model may use recent price levels as a feature for pattern recognition.",
+  price_change_pct: "Recent price change percentage. Captures short-term momentum that may continue or revert.",
+  insider_score: "Insider trading aggregation score. C-suite transactions weighted higher. Cluster buys (multiple insiders buying) are strongly bullish.",
+  macro_regime: "FRED-based macro environment classification. Captures whether the broader economic environment favors risk-on or risk-off positioning.",
+};
+
 function MLPredictionPanel({ data }: { data: AlphaData }) {
   const [retraining, setRetraining] = useState(false);
   const [retrainResult, setRetrainResult] = useState<string | null>(null);
+  const [featureModal, setFeatureModal] = useState<{ feature: string; importance: number } | null>(null);
 
   const ml = data.ml_prediction;
   const features = data.feature_importance || [];
@@ -1201,9 +1234,15 @@ function MLPredictionPanel({ data }: { data: AlphaData }) {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* --- Direction Predictions --- */}
         <div className="lg:col-span-1 space-y-4">
-          <h4 className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">
-            Direction Predictions
-          </h4>
+          <div className="flex items-center gap-1.5">
+            <h4 className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">
+              Direction Predictions
+            </h4>
+            <InfoTooltip title="Daily Predictions">
+              <p>LightGBM ensemble prediction of price direction. 1D = next trading day, 5D = next week.</p>
+              <p>Probability bars show model confidence in each direction (up/flat/down). Higher confidence = stronger signal.</p>
+            </InfoTooltip>
+          </div>
 
           {/* 1-Day */}
           <div>
@@ -1262,9 +1301,15 @@ function MLPredictionPanel({ data }: { data: AlphaData }) {
 
         {/* --- Score Blend --- */}
         <div className="lg:col-span-1 space-y-4">
-          <h4 className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">
-            Score Blend
-          </h4>
+          <div className="flex items-center gap-1.5">
+            <h4 className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">
+              Score Blend
+            </h4>
+            <InfoTooltip title="Score Blend">
+              <p>Combines rule-based alpha score (60%) with ML model prediction (40%).</p>
+              <p>The blend leverages both human-designed indicators and machine-learned patterns. Blended score closer to +/-1 indicates stronger agreement between approaches.</p>
+            </InfoTooltip>
+          </div>
           <div className="flex items-end gap-4 h-36">
             {/* Rule-Based */}
             <div className="flex-1 flex flex-col items-center">
@@ -1312,15 +1357,26 @@ function MLPredictionPanel({ data }: { data: AlphaData }) {
 
         {/* --- Feature Importance --- */}
         <div className="lg:col-span-1 space-y-3">
-          <h4 className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">
-            Top Features
-          </h4>
+          <div className="flex items-center gap-1.5">
+            <h4 className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">
+              Top Features
+            </h4>
+            <InfoTooltip title="Top Features">
+              <p>Features ranked by importance in the ML model&apos;s decision-making. Higher importance = more influence on the prediction.</p>
+              <p>RSI and MACD often dominate for momentum stocks; sentiment features matter more for news-driven moves.</p>
+            </InfoTooltip>
+          </div>
           {features.length === 0 ? (
             <p className="text-xs text-text-muted py-4">No feature data</p>
           ) : (
             <div className="space-y-1.5">
               {features.map((f, i) => (
-                <div key={i} className="flex items-center gap-2">
+                <button
+                  key={i}
+                  className="flex items-center gap-2 w-full text-left hover:bg-surface-alt/50 rounded px-1 -mx-1 py-0.5 transition-colors cursor-pointer"
+                  onClick={() => setFeatureModal(f)}
+                  title={`Click to analyze ${f.feature}`}
+                >
                   <span className="text-[10px] text-text-muted w-28 truncate font-mono" title={f.feature}>
                     {f.feature}
                   </span>
@@ -1333,7 +1389,7 @@ function MLPredictionPanel({ data }: { data: AlphaData }) {
                   <span className="font-mono text-[10px] text-text-secondary w-10 text-right">
                     {(f.importance * 100).toFixed(1)}
                   </span>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -1341,9 +1397,15 @@ function MLPredictionPanel({ data }: { data: AlphaData }) {
 
         {/* --- Model Info Footer --- */}
         <div className="lg:col-span-1 space-y-3">
-          <h4 className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">
-            Model Info
-          </h4>
+          <div className="flex items-center gap-1.5">
+            <h4 className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">
+              Model Info
+            </h4>
+            <InfoTooltip title="Model Info">
+              <p>ML model training statistics. Accuracy = % of correct directional predictions on held-out validation data.</p>
+              <p>Higher accuracy on 5D vs 1D is typical as noise averages out over longer horizons. Retrain periodically as market conditions change.</p>
+            </InfoTooltip>
+          </div>
           <div className="space-y-2 text-xs">
             {stats?.trained_at && (
               <div className="flex items-center justify-between">
@@ -1407,6 +1469,23 @@ function MLPredictionPanel({ data }: { data: AlphaData }) {
           </div>
         </div>
       </div>
+
+      {/* Feature analysis modal */}
+      {featureModal && (
+        <AnalysisModal
+          entity={{
+            id: data.ticker,
+            label: `${data.ticker} - ${featureModal.feature} Feature`,
+            sentiment: data.score?.direction === "bullish" ? 0.8 : data.score?.direction === "bearish" ? 0.2 : 0.5,
+            volume: 0,
+            signal_type: "feature_importance",
+            confidence: featureModal.importance,
+            headline: FEATURE_DESCRIPTIONS[featureModal.feature] || `${featureModal.feature}: ML feature with importance ${(featureModal.importance * 100).toFixed(1)}%. This feature contributes to the model's directional prediction for ${data.ticker}.`,
+          }}
+          contextType="signal"
+          onClose={() => setFeatureModal(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1443,6 +1522,7 @@ export default function FinancialAlphaPage() {
   const ticker = (params.ticker as string) || "TSLA";
   const { data, loading, error } = useAlphaData(ticker);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  const [sourceModal, setSourceModal] = useState<{ source: string; count: number } | null>(null);
 
   // Prepare chart data from candles + technicals_series
   const chartData = useMemo(() => {
@@ -1892,9 +1972,15 @@ export default function FinancialAlphaPage() {
                 {/* Source breakdown */}
                 {Object.keys(data.sentiment.sources).length > 0 && (
                   <div>
-                    <p className="text-[11px] text-text-muted uppercase tracking-wider mb-2">
-                      Volume by Source
-                    </p>
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <p className="text-[11px] text-text-muted uppercase tracking-wider">
+                        Volume by Source
+                      </p>
+                      <InfoTooltip title="Sentiment Analysis">
+                        <p>Aggregate sentiment from the OSINT pipeline. Score derived from mention volume and quality signals across HackerNews, Reddit, SEC filings, and financial news.</p>
+                        <p>Source breakdown shows which platforms are driving the signal. Click any source for deeper analysis.</p>
+                      </InfoTooltip>
+                    </div>
                     <div className="space-y-1.5">
                       {Object.entries(data.sentiment.sources)
                         .sort(([, a], [, b]) => b - a)
@@ -1905,7 +1991,12 @@ export default function FinancialAlphaPage() {
                           );
                           const pct = (count / maxCount) * 100;
                           return (
-                            <div key={src} className="flex items-center gap-2">
+                            <button
+                              key={src}
+                              className="flex items-center gap-2 w-full text-left hover:bg-surface-alt/50 rounded px-1 -mx-1 py-0.5 transition-colors cursor-pointer"
+                              onClick={() => setSourceModal({ source: src, count })}
+                              title={`Click to analyze ${src} sentiment`}
+                            >
                               <span className="text-[11px] text-text-muted w-24 truncate">
                                 {src}
                               </span>
@@ -1918,7 +2009,7 @@ export default function FinancialAlphaPage() {
                               <span className="font-mono text-[11px] text-text-secondary w-8 text-right">
                                 {count}
                               </span>
-                            </div>
+                            </button>
                           );
                         })}
                     </div>
@@ -1954,6 +2045,28 @@ export default function FinancialAlphaPage() {
           }}
           contextType="entity"
           onClose={() => setShowAnalysis(false)}
+        />
+      )}
+
+      {/* Source analysis modal */}
+      {sourceModal && (
+        <AnalysisModal
+          entity={{
+            id: data.ticker,
+            label: `${data.ticker} - ${sourceModal.source} Sentiment`,
+            sentiment: sentimentScore,
+            volume: sourceModal.count,
+            sources: { [sourceModal.source]: sourceModal.count },
+            keywords: data.sentiment?.keywords,
+            sampleDocs: data.sentiment?.sample_docs?.filter(
+              (d) => d.source === sourceModal.source
+            ),
+            signal_type: "source_sentiment",
+            confidence: data.signal?.confidence,
+            headline: SOURCE_DESCRIPTIONS[sourceModal.source] || `${sourceModal.source}: ${sourceModal.count} documents contributing to sentiment analysis for ${data.ticker}.`,
+          }}
+          contextType="signal"
+          onClose={() => setSourceModal(null)}
         />
       )}
     </div>
