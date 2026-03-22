@@ -24,6 +24,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import math
 import os
 import sqlite3
 import threading
@@ -35,6 +36,37 @@ from typing import Optional
 log = logging.getLogger("stock_alpha.feature_store")
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# ---------------------------------------------------------------------------
+# Source reliability weights (shared convention from CLAUDE.md)
+# ---------------------------------------------------------------------------
+
+_SOURCE_WEIGHTS: dict[str, float] = {
+    "sec": 1.0,
+    "sec_insider": 1.0,
+    "finance.sec": 1.0,
+    "news": 0.8,
+    "google_trends": 0.8,
+    "trends": 0.8,
+    "github": 0.7,
+    "trustpilot": 0.6,
+    "hacker_news": 0.5,
+    "hn": 0.5,
+    "reddit": 0.4,
+}
+
+
+def _weight_for_source(source_name: str) -> float:
+    """Return reliability weight for a source name (case-insensitive fuzzy match)."""
+    s = source_name.lower().strip()
+    # Direct match
+    if s in _SOURCE_WEIGHTS:
+        return _SOURCE_WEIGHTS[s]
+    # Substring match
+    for key, weight in _SOURCE_WEIGHTS.items():
+        if key in s or s in key:
+            return weight
+    return 0.5  # default weight for unknown sources
 
 # ---------------------------------------------------------------------------
 # Feature column names (deterministic order used everywhere)
@@ -66,6 +98,15 @@ FEATURE_COLUMNS: list[str] = [
     "insider_score",
     "macro_regime_score",
     "correlation_confidence",
+    # --- New high-value features ---
+    "sentiment_dispersion",
+    "hour_sin",
+    "hour_cos",
+    "day_of_week",
+    "news_recency_score",
+    "source_weighted_sentiment",
+    "volume_momentum",
+    "cross_sector_relative",
 ]
 
 LABEL_COLUMNS: list[str] = [
@@ -131,6 +172,28 @@ class FeatureSnapshot:
     # Correlation
     correlation_confidence: Optional[float] = None
 
+    # --- New high-value features ---
+
+    # Sentiment dispersion: std dev of per-source sentiment scores
+    sentiment_dispersion: Optional[float] = None
+
+    # Cyclical time encoding
+    hour_sin: Optional[float] = None
+    hour_cos: Optional[float] = None
+    day_of_week: Optional[int] = None
+
+    # Exponential time-weighted sentiment (recent docs count more)
+    news_recency_score: Optional[float] = None
+
+    # Sentiment weighted by source reliability
+    source_weighted_sentiment: Optional[float] = None
+
+    # Rate of change of mention volume
+    volume_momentum: Optional[float] = None
+
+    # Ticker sentiment minus cross-sector average
+    cross_sector_relative: Optional[float] = None
+
     # Labels (filled in later by label_with_returns)
     return_1d: Optional[float] = None
     return_5d: Optional[float] = None
@@ -150,7 +213,6 @@ def _safe_float(val) -> Optional[float]:
     if val is None:
         return None
     try:
-        import math
         f = float(val)
         return None if math.isnan(f) or math.isinf(f) else f
     except (TypeError, ValueError):
@@ -166,6 +228,137 @@ def _direction_label(ret: Optional[float]) -> Optional[str]:
     if ret < -0.5:
         return "down"
     return "flat"
+
+
+# ---------------------------------------------------------------------------
+# New feature computation helpers
+# ---------------------------------------------------------------------------
+
+_NEWS_RECENCY_DECAY = 0.1  # exponential decay rate per hour
+
+
+def _compute_cyclical_time(now: datetime) -> tuple[float, float, int]:
+    """Return (hour_sin, hour_cos, day_of_week) for cyclical time encoding."""
+    hour = now.hour + now.minute / 60.0
+    hour_sin = math.sin(2 * math.pi * hour / 24.0)
+    hour_cos = math.cos(2 * math.pi * hour / 24.0)
+    day_of_week = now.weekday()  # 0=Monday .. 6=Sunday
+    return hour_sin, hour_cos, day_of_week
+
+
+def _compute_news_recency_score(history, now: datetime) -> Optional[float]:
+    """Compute exponential time-weighted sentiment from SVC history.
+
+    Formula: sum(sentiment_i * exp(-decay * hours_since_i))
+             / sum(exp(-decay * hours_since_i))
+
+    ``history`` is an iterable of objects with ``.timestamp`` and
+    ``.sentiment_score`` attributes (e.g., SentimentDataPoint).
+    """
+    if not history:
+        return None
+
+    weighted_sum = 0.0
+    weight_total = 0.0
+
+    for dp in history:
+        hours_since = max((now - dp.timestamp).total_seconds() / 3600.0, 0.0)
+        w = math.exp(-_NEWS_RECENCY_DECAY * hours_since)
+        weighted_sum += dp.sentiment_score * w
+        weight_total += w
+
+    if weight_total == 0:
+        return None
+
+    return weighted_sum / weight_total
+
+
+def _compute_source_weighted_sentiment(history) -> Optional[float]:
+    """Compute sentiment weighted by source reliability.
+
+    Each SentimentDataPoint may have a ``source`` attribute.  If not,
+    falls back to uniform weighting.
+    """
+    if not history:
+        return None
+
+    weighted_sum = 0.0
+    weight_total = 0.0
+
+    for dp in history:
+        source = getattr(dp, "source", None)
+        w = _weight_for_source(source) if source else 0.5
+        weighted_sum += dp.sentiment_score * w
+        weight_total += w
+
+    if weight_total == 0:
+        return None
+
+    return weighted_sum / weight_total
+
+
+def _compute_volume_momentum(history, window: int = 5) -> Optional[float]:
+    """Rate of change of mention volume: (recent_avg - prior_avg) / prior_avg.
+
+    Uses two consecutive windows of ``window`` data points from the SVC
+    history's mention_count attribute.
+    """
+    if not history or len(history) < window * 2:
+        return None
+
+    points = list(history)
+    recent = points[-window:]
+    prior = points[-window * 2 : -window]
+
+    recent_avg = sum(p.mention_count for p in recent) / len(recent)
+    prior_avg = sum(p.mention_count for p in prior) / len(prior)
+
+    if prior_avg <= 0:
+        return 1.0 if recent_avg > 0 else 0.0
+
+    return (recent_avg - prior_avg) / prior_avg
+
+
+def _compute_sentiment_dispersion(history) -> Optional[float]:
+    """Standard deviation of per-data-point sentiment scores in SVC history."""
+    if not history or len(history) < 2:
+        return None
+
+    scores = [dp.sentiment_score for dp in history]
+    n = len(scores)
+    mean = sum(scores) / n
+    variance = sum((s - mean) ** 2 for s in scores) / (n - 1)
+    return math.sqrt(variance)
+
+
+def _compute_cross_sector_relative(
+    ticker: str, svc_computer
+) -> Optional[float]:
+    """Ticker sentiment minus average sentiment across all tracked tickers.
+
+    Uses the SVCComputer to get all tracked tickers and their current
+    sentiment averages.
+    """
+    try:
+        all_tickers = svc_computer.get_tracked_tickers()
+        if not all_tickers or len(all_tickers) < 2:
+            return None
+
+        # Gather sentiment averages for all tickers
+        sentiments: dict[str, float] = {}
+        for t in all_tickers:
+            result = svc_computer.compute(t)
+            if result is not None:
+                sentiments[t] = result.sentiment_avg
+
+        if ticker not in sentiments or len(sentiments) < 2:
+            return None
+
+        ticker_sent = sentiments[ticker]
+        avg_sent = sum(sentiments.values()) / len(sentiments)
+        return ticker_sent - avg_sent
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +396,14 @@ CREATE TABLE IF NOT EXISTS snapshots (
     insider_score REAL,
     macro_regime_score REAL,
     correlation_confidence REAL,
+    sentiment_dispersion REAL,
+    hour_sin REAL,
+    hour_cos REAL,
+    day_of_week INTEGER,
+    news_recency_score REAL,
+    source_weighted_sentiment REAL,
+    volume_momentum REAL,
+    cross_sector_relative REAL,
     return_1d REAL,
     return_5d REAL,
     return_10d REAL,
@@ -212,6 +413,18 @@ CREATE TABLE IF NOT EXISTS snapshots (
     UNIQUE(ticker, timestamp)
 );
 """
+
+# Columns to add to existing databases via ALTER TABLE migration
+_MIGRATION_COLUMNS: list[tuple[str, str]] = [
+    ("sentiment_dispersion", "REAL"),
+    ("hour_sin", "REAL"),
+    ("hour_cos", "REAL"),
+    ("day_of_week", "INTEGER"),
+    ("news_recency_score", "REAL"),
+    ("source_weighted_sentiment", "REAL"),
+    ("volume_momentum", "REAL"),
+    ("cross_sector_relative", "REAL"),
+]
 
 _CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_snapshots_ticker_ts ON snapshots(ticker, timestamp);",
@@ -236,6 +449,7 @@ class FeatureStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._create_tables()
+        self._migrate_columns()
         log.info("FeatureStore opened: %s", db_path)
 
     # ------------------------------------------------------------------
@@ -247,6 +461,23 @@ class FeatureStore:
         cur.execute(_CREATE_TABLE)
         for idx_sql in _CREATE_INDEXES:
             cur.execute(idx_sql)
+        self._conn.commit()
+
+    def _migrate_columns(self):
+        """Add new columns to existing databases using ALTER TABLE.
+
+        Each ALTER TABLE ADD COLUMN is wrapped in try/except so that
+        columns that already exist (from _CREATE_TABLE on fresh DBs)
+        are silently skipped.
+        """
+        cur = self._conn.cursor()
+        for col_name, col_type in _MIGRATION_COLUMNS:
+            try:
+                cur.execute(f"ALTER TABLE snapshots ADD COLUMN {col_name} {col_type}")
+                log.info("Migrated: added column %s to snapshots", col_name)
+            except sqlite3.OperationalError:
+                # Column already exists — expected on fresh databases
+                pass
         self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -289,6 +520,8 @@ class FeatureStore:
         price = _safe_float(latest.get("close"))
         if price is None or price <= 0:
             return None
+
+        now = datetime.now(timezone.utc)
 
         # Price change (1-day)
         price_change_1d = None
@@ -398,9 +631,31 @@ class FeatureStore:
         except Exception:
             pass
 
+        # 8. New high-value features
+        # --- Cyclical time encoding ---
+        hour_sin, hour_cos, day_of_week = _compute_cyclical_time(now)
+
+        # --- SVC history-derived features ---
+        svc_history = engine._svc._history.get(ticker)
+
+        # Sentiment dispersion
+        sent_dispersion = _compute_sentiment_dispersion(svc_history)
+
+        # News recency score (exponential time-weighted sentiment)
+        news_recency = _compute_news_recency_score(svc_history, now)
+
+        # Source-weighted sentiment
+        src_weighted_sent = _compute_source_weighted_sentiment(svc_history)
+
+        # Volume momentum
+        vol_momentum = _compute_volume_momentum(svc_history)
+
+        # Cross-sector relative sentiment
+        cross_sector_rel = _compute_cross_sector_relative(ticker, engine._svc)
+
         snap = FeatureSnapshot(
             ticker=ticker,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=now,
             price=price,
             price_change_1d_pct=price_change_1d,
             volume=vol,
@@ -426,6 +681,15 @@ class FeatureStore:
             insider_score=insider_val,
             macro_regime_score=macro_val,
             correlation_confidence=None,
+            # New features
+            sentiment_dispersion=sent_dispersion,
+            hour_sin=hour_sin,
+            hour_cos=hour_cos,
+            day_of_week=day_of_week,
+            news_recency_score=news_recency,
+            source_weighted_sentiment=src_weighted_sent,
+            volume_momentum=vol_momentum,
+            cross_sector_relative=cross_sector_rel,
         )
 
         self._store(snap)
@@ -713,6 +977,9 @@ class FeatureStore:
                     vwap_distance_pct, fvg_bias, volume_profile_poc_distance_pct,
                     cumulative_delta_normalized, imbalance_ratio,
                     insider_score, macro_regime_score, correlation_confidence,
+                    sentiment_dispersion, hour_sin, hour_cos, day_of_week,
+                    news_recency_score, source_weighted_sentiment,
+                    volume_momentum, cross_sector_relative,
                     return_1d, return_5d, return_10d,
                     direction_1d, direction_5d, direction_10d
                 ) VALUES (
@@ -725,6 +992,9 @@ class FeatureStore:
                     ?, ?, ?,
                     ?, ?,
                     ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?,
+                    ?, ?,
                     ?, ?, ?,
                     ?, ?, ?
                 )
@@ -756,6 +1026,14 @@ class FeatureStore:
                     _safe_float(snap.insider_score),
                     _safe_float(snap.macro_regime_score),
                     _safe_float(snap.correlation_confidence),
+                    _safe_float(snap.sentiment_dispersion),
+                    _safe_float(snap.hour_sin),
+                    _safe_float(snap.hour_cos),
+                    snap.day_of_week,
+                    _safe_float(snap.news_recency_score),
+                    _safe_float(snap.source_weighted_sentiment),
+                    _safe_float(snap.volume_momentum),
+                    _safe_float(snap.cross_sector_relative),
                     _safe_float(snap.return_1d),
                     _safe_float(snap.return_5d),
                     _safe_float(snap.return_10d),
