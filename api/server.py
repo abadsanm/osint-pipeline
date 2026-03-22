@@ -923,6 +923,184 @@ async def get_alpha(ticker: str):
 
 
 # ---------------------------------------------------------------------------
+# Product Innovation Endpoint
+# ---------------------------------------------------------------------------
+
+# Sources considered product-related for the innovation page
+_PRODUCT_TOPICS = [
+    "consumer.reviews.trustpilot",
+    "consumer.reviews.amazon",
+    "finance.reddit.posts",
+    "tech.hn.stories",
+]
+
+# Keywords that indicate a feature request
+_REQUEST_KEYWORDS = {
+    "wish", "want", "need", "should", "missing",
+    "please", "feature", "request", "improve", "add",
+}
+
+
+@app.get("/api/innovation")
+def get_innovation(
+    source: Optional[str] = Query(None, description="Filter by source platform"),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Data for the Product Innovation dashboard page."""
+    import math
+
+    with _lock:
+        # ----- channels: doc counts per source -----
+        channels: dict[str, int] = {}
+        for src in ("reddit", "hacker_news", "trustpilot", "amazon", "producthunt"):
+            channels[src] = pipeline_stats["sources"].get(src, 0)
+
+        # ----- collect entities, optionally filtered by source -----
+        filtered_entities: list[dict] = []
+        for em in entity_mentions.values():
+            if source:
+                src_dict = em.get("sources", {})
+                if isinstance(src_dict, dict) and src_dict.get(source, 0) > 0:
+                    filtered_entities.append(em)
+            else:
+                filtered_entities.append(em)
+
+        # ----- criticisms: negative-sentiment entities -----
+        criticisms: list[dict] = []
+        for em in filtered_entities:
+            s_count = em.get("sentiment_count", 0)
+            if s_count <= 0:
+                continue
+            avg_sent = em["sentiment_sum"] / s_count
+            if avg_sent >= 0.45:
+                continue
+            # intensity: lower sentiment = higher intensity (0-1 scale)
+            intensity = round(1.0 - avg_sent, 3)
+            sample_quote = ""
+            sample_docs_list = em.get("sample_docs", [])
+            if sample_docs_list:
+                sample_quote = sample_docs_list[0].get("content") or sample_docs_list[0].get("title") or ""
+            src_dict = em.get("sources", {})
+            source_list = sorted(src_dict.keys()) if isinstance(src_dict, dict) else []
+            criticisms.append({
+                "feature": em.get("label", em["id"]),
+                "volume": em.get("volume", 0),
+                "intensity": intensity,
+                "sources": source_list,
+                "sample_quote": sample_quote[:300],
+            })
+        criticisms.sort(key=lambda c: c["volume"], reverse=True)
+        criticisms = criticisms[:limit]
+
+        # ----- requests: entities with request-like keywords or product types -----
+        requests_list: list[dict] = []
+        for em in filtered_entities:
+            kws = [k.lower() for k in em.get("keywords", [])]
+            match_count = sum(1 for kw in kws for rk in _REQUEST_KEYWORDS if rk in kw)
+            etype = (em.get("entity_type") or "").upper()
+            is_product_type = etype in ("PRODUCT", "TECHNOLOGY")
+
+            if match_count == 0 and not is_product_type:
+                continue
+
+            # intensity based on keyword match density
+            if kws:
+                intensity = round(min(1.0, match_count / max(len(kws), 1)), 3)
+            else:
+                intensity = 0.3 if is_product_type else 0.0
+
+            sample_quote = ""
+            sample_docs_list = em.get("sample_docs", [])
+            if sample_docs_list:
+                sample_quote = sample_docs_list[0].get("content") or sample_docs_list[0].get("title") or ""
+            src_dict = em.get("sources", {})
+            source_list = sorted(src_dict.keys()) if isinstance(src_dict, dict) else []
+            requests_list.append({
+                "feature": em.get("label", em["id"]),
+                "volume": em.get("volume", 0),
+                "intensity": intensity,
+                "sources": source_list,
+                "sample_quote": sample_quote[:300],
+            })
+        requests_list.sort(key=lambda r: r["volume"], reverse=True)
+        requests_list = requests_list[:limit]
+
+        # ----- gap_map: satisfaction vs importance scatter -----
+        gap_map: list[dict] = []
+        # Find max volume for log-normalization
+        volumes = [em.get("volume", 0) for em in filtered_entities if em.get("volume", 0) >= 3]
+        max_vol = max(volumes) if volumes else 1
+        log_max = math.log(max_vol) if max_vol > 1 else 1.0
+
+        for em in filtered_entities:
+            vol = em.get("volume", 0)
+            if vol < 3:
+                continue
+            s_count = em.get("sentiment_count", 0)
+            satisfaction = round(em["sentiment_sum"] / s_count, 3) if s_count > 0 else 0.5
+            importance = round(min(1.0, math.log(max(vol, 1)) / log_max), 3) if log_max > 0 else 0.0
+            gap_map.append({
+                "feature": em.get("label", em["id"]),
+                "satisfaction": satisfaction,
+                "importance": importance,
+                "volume": vol,
+                "entity_id": em["id"],
+            })
+        gap_map.sort(key=lambda g: g["importance"], reverse=True)
+        gap_map = gap_map[:limit]
+
+        # ----- trending_topics: top keywords across all entities -----
+        keyword_counts: dict[str, int] = defaultdict(int)
+        for em in filtered_entities:
+            for kw in em.get("keywords", []):
+                keyword_counts[kw] += 1
+        trending_topics = sorted(
+            [{"keyword": kw, "count": cnt} for kw, cnt in keyword_counts.items()],
+            key=lambda t: t["count"],
+            reverse=True,
+        )[:20]
+
+        # ----- recent_insights: latest docs from product-related sources -----
+        recent_insights: list[dict] = []
+        for topic_key in _PRODUCT_TOPICS:
+            for doc in recent_docs.get(topic_key, []):
+                doc_source = doc.get("source", "")
+                if source and doc_source != source:
+                    continue
+                recent_insights.append({
+                    "title": (doc.get("title") or "")[:200],
+                    "source": doc_source,
+                    "content": (doc.get("content_text") or "")[:300],
+                    "url": doc.get("url"),
+                    "created_at": doc.get("created_at") or doc.get("ingested_at"),
+                })
+        # Sort by created_at descending, take latest N
+        recent_insights.sort(key=lambda d: d.get("created_at") or "", reverse=True)
+        recent_insights = recent_insights[:limit]
+
+        # ----- source_breakdown: aggregate stats for active filter -----
+        total_entities = len(filtered_entities)
+        total_mentions = sum(em.get("volume", 0) for em in filtered_entities)
+        sent_sum = sum(em.get("sentiment_sum", 0) for em in filtered_entities if em.get("sentiment_count", 0) > 0)
+        sent_cnt = sum(em.get("sentiment_count", 0) for em in filtered_entities)
+        avg_sentiment = round(sent_sum / sent_cnt, 3) if sent_cnt > 0 else 0.5
+
+    return {
+        "channels": channels,
+        "criticisms": criticisms,
+        "requests": requests_list,
+        "gap_map": gap_map,
+        "trending_topics": trending_topics,
+        "recent_insights": recent_insights,
+        "source_breakdown": {
+            "total_entities": total_entities,
+            "total_mentions": total_mentions,
+            "avg_sentiment": avg_sentiment,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # AI Analysis Endpoint
 # ---------------------------------------------------------------------------
 
