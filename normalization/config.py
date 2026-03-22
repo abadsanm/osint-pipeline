@@ -33,6 +33,10 @@ class NormalizationConfig:
         "tech.techmeme.articles",
         "tech.newsletter.articles",
         "gov.sam.opportunities",
+        "gov.usaspending.awards",
+        "gov.federal_register.documents",
+        "gov.sbir.awards",
+        "gov.economic.indicators",
     ]
 
     OUTPUT_TOPIC = "osint.normalized"

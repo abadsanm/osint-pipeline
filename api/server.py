@@ -224,6 +224,10 @@ def _consume_raw_topics():
         "tech.techcrunch.articles", "finance.seeking_alpha.articles",
         "finance.finviz.news", "tech.techmeme.articles", "tech.newsletter.articles",
         "gov.sam.opportunities",
+        "gov.usaspending.awards",
+        "gov.federal_register.documents",
+        "gov.sbir.awards",
+        "gov.economic.indicators",
     ]
 
     consumer = Consumer({
