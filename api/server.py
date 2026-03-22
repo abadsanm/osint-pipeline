@@ -1884,11 +1884,23 @@ def search_entities(
                 if em.get("sentiment_count", 0) > 0:
                     sentiment = em["sentiment_sum"] / em["sentiment_count"]
                 seen_ids.add(eid)
+                # Infer entity type from id pattern
+                eid_upper = em["id"].upper()
+                if len(eid_upper) <= 5 and eid_upper.isalpha():
+                    etype = "TICKER"
+                elif eid_upper.startswith("R/"):
+                    etype = "GROUP"
+                elif " " not in em["id"] and len(em["id"]) <= 10:
+                    etype = "COMPANY"
+                else:
+                    etype = "ENTITY"
+
                 results.append({
                     "id": em["id"],
                     "label": em.get("label", eid),
                     "volume": em.get("volume", 0),
                     "sentiment": round(sentiment, 3),
+                    "entity_type": etype,
                     "source": "pipeline",
                     "_score": score,
                 })

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import ChatPanel from "./ChatPanel";
 import NotesPanel from "./NotesPanel";
 import ResearchPanel from "./ResearchPanel";
+import AnalysisModal from "./AnalysisModal";
 
 interface HeaderProps {
   title: string;
@@ -16,6 +17,10 @@ interface SearchResult {
   label: string;
   volume: number;
   sentiment: number;
+  entity_type?: string;
+  sources?: Record<string, number>;
+  keywords?: string[];
+  sampleDocs?: any[];
 }
 
 interface Alert {
@@ -66,6 +71,7 @@ export default function Header({ title }: HeaderProps) {
   const [chatOpen, setChatOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
   const [researchOpen, setResearchOpen] = useState(false);
+  const [analysisEntity, setAnalysisEntity] = useState<SearchResult | null>(null);
 
   // Timer
   useEffect(() => {
@@ -145,8 +151,20 @@ export default function Header({ title }: HeaderProps) {
   const handleSearchSelect = (result: SearchResult) => {
     setQuery("");
     setShowSearch(false);
-    const ticker = result.id.replace(/[^a-zA-Z0-9]/g, "");
-    router.push(`/alpha/${ticker}`);
+
+    const id = result.id;
+    const isTickerLike = /^[A-Z]{1,5}$/.test(id) || /^\$[A-Z]{1,5}$/.test(id);
+    const entityType = result.entity_type?.toUpperCase() || "";
+    const isFinancial = isTickerLike || entityType === "TICKER" || entityType === "COMPANY";
+
+    if (isFinancial) {
+      // Route to Financial Alpha page
+      const ticker = id.replace(/[^a-zA-Z0-9]/g, "");
+      router.push(`/alpha/${ticker}`);
+    } else {
+      // Open AI analysis modal for non-financial entities (people, tech, etc.)
+      setAnalysisEntity(result);
+    }
   };
 
   const sentimentLabel = (s: number) => {
@@ -420,12 +438,19 @@ export default function Header({ title }: HeaderProps) {
                     className="w-full flex items-center justify-between px-3 py-2 hover:bg-surface/50 transition-colors text-left border-b border-border/30 last:border-0"
                   >
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs text-text-primary font-semibold truncate">{r.label}</p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-xs text-text-primary font-semibold truncate">{r.label}</p>
+                        {r.entity_type && (
+                          <span className="text-[9px] px-1 py-0.5 rounded bg-surface border border-border/50 text-text-muted uppercase flex-shrink-0">
+                            {r.entity_type === "TICKER" ? "Stock" : r.entity_type === "COMPANY" ? "Company" : r.entity_type === "PERSON" ? "Person" : r.entity_type?.toLowerCase()}
+                          </span>
+                        )}
+                      </div>
                       <p className="text-[10px] text-text-muted truncate">{r.id}</p>
                     </div>
-                    <div className="flex items-center gap-3 flex-shrink-0 ml-2">
+                    <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                       <span className="text-[10px] text-text-muted font-mono">
-                        Vol: {r.volume}
+                        {r.volume}
                       </span>
                       <span className={`text-[10px] font-semibold ${sl.cls}`}>
                         {sl.text}
@@ -449,6 +474,23 @@ export default function Header({ title }: HeaderProps) {
         <div
           className="fixed inset-0 bg-black/30 z-40"
           onClick={() => { setChatOpen(false); setNotesOpen(false); setResearchOpen(false); }}
+        />
+      )}
+
+      {/* Analysis modal for non-financial search results */}
+      {analysisEntity && (
+        <AnalysisModal
+          entity={{
+            id: analysisEntity.id,
+            label: analysisEntity.label,
+            sentiment: analysisEntity.sentiment,
+            volume: analysisEntity.volume,
+            sources: analysisEntity.sources,
+            keywords: analysisEntity.keywords,
+            sampleDocs: analysisEntity.sampleDocs,
+          }}
+          contextType="entity"
+          onClose={() => setAnalysisEntity(null)}
         />
       )}
     </>
