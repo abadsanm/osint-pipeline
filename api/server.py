@@ -1908,28 +1908,29 @@ def search_entities(
                     "_score": score,
                 })
 
-    # 2. If few results, try yfinance ticker lookup as fallback
-    if len(results) < 3:
-        ticker_query = query.upper().strip()
-        # Check if it looks like a ticker (1-5 uppercase letters)
-        if 1 <= len(ticker_query) <= 5 and ticker_query.isalpha():
-            try:
-                import yfinance as yf
-                info = yf.Ticker(ticker_query).info
-                name = info.get("shortName") or info.get("longName")
-                if name and ticker_query not in seen_ids:
-                    price = info.get("currentPrice") or info.get("regularMarketPrice")
-                    results.append({
-                        "id": ticker_query,
-                        "label": f"{ticker_query} — {name}",
-                        "volume": 0,
-                        "sentiment": 0.5,
-                        "source": "yfinance",
-                        "price": round(price, 2) if price else None,
-                        "_score": 90,
-                    })
-            except Exception:
-                pass
+    # 2. Always try yfinance for ticker-like queries (1-5 uppercase letters)
+    ticker_query = query.upper().strip()
+    if 1 <= len(ticker_query) <= 5 and ticker_query.isalpha() and ticker_query not in seen_ids:
+        try:
+            import yfinance as yf
+            info = yf.Ticker(ticker_query).info
+            name = info.get("shortName") or info.get("longName")
+            if name:
+                price = info.get("currentPrice") or info.get("regularMarketPrice")
+                seen_ids.add(ticker_query)
+                # Insert at top — exact ticker match is highest priority
+                results.insert(0, {
+                    "id": ticker_query,
+                    "label": f"{ticker_query} — {name}",
+                    "volume": 0,
+                    "sentiment": 0.5,
+                    "entity_type": "TICKER",
+                    "source": "yfinance",
+                    "price": round(price, 2) if price else None,
+                    "_score": 100,
+                })
+        except Exception:
+            pass
 
         # Also check if query matches a known ticker in our map
         if query in TICKER_MAP and TICKER_MAP[query].upper() not in seen_ids:
