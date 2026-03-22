@@ -140,9 +140,11 @@ class SamGovFetcher:
         opportunities: list[dict] = []
 
         posted_from = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%m/%d/%Y")
+        posted_to = datetime.now(timezone.utc).strftime("%m/%d/%Y")
         params = {
             "api_key": SamGovConfig.API_KEY,
             "postedFrom": posted_from,
+            "postedTo": posted_to,
             "limit": "25",
             "offset": "0",
         }
