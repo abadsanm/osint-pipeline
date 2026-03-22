@@ -130,7 +130,7 @@ const SCORE_COMPONENTS: {
 }[] = [
   { key: "sentiment", weightKey: "sentiment_weight", label: "Sentiment", color: "#58A6FF", bg: "bg-accent-blue" },
   { key: "svc", weightKey: "svc_weight", label: "SVC", color: "#A78BFA", bg: "bg-[#A78BFA]" },
-  { key: "technicals", weightKey: "technical_weight", label: "Technicals", color: "#22D3EE", bg: "bg-[#22D3EE]" },
+  { key: "technical", weightKey: "technical_weight", label: "Technicals", color: "#22D3EE", bg: "bg-[#22D3EE]" },
   { key: "microstructure", weightKey: "microstructure_weight", label: "Microstructure", color: "#FBBF24", bg: "bg-[#FBBF24]" },
   { key: "order_flow", weightKey: "order_flow_weight", label: "Order Flow", color: "#00FFC2", bg: "bg-bullish" },
   { key: "correlation", weightKey: "correlation_weight", label: "Correlation", color: "#F472B6", bg: "bg-[#F472B6]" },
