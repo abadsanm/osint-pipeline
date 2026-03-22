@@ -20,6 +20,7 @@ import {
 } from "recharts";
 import { ExternalLink, Brain, TrendingUp, TrendingDown, Minus, ArrowRight } from "lucide-react";
 import AnalysisModal from "@/components/AnalysisModal";
+import InfoTooltip from "@/components/InfoTooltip";
 
 /* ─── Types ─── */
 
@@ -371,10 +372,15 @@ export default function InnovationPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-module-gap-lg">
           {/* Criticisms — The Pain */}
           <div className="bg-surface border border-border rounded-card p-card-padding-lg">
-            <h3 className="text-sm font-semibold mb-4">
-              <span className="text-bearish">Top Criticisms</span>
-              <span className="text-text-muted ml-2 font-normal text-xs">The Pain</span>
-            </h3>
+            <div className="flex items-center gap-1.5 mb-4">
+              <h3 className="text-sm font-semibold">
+                <span className="text-bearish">Top Criticisms</span>
+                <span className="text-text-muted ml-2 font-normal text-xs">The Pain</span>
+              </h3>
+              <InfoTooltip title="Top Criticisms">
+                <p>Entities from the pipeline with below-neutral sentiment, ranked by mention volume. These represent the most-discussed pain points detected across all monitored sources. High intensity (darker bars) indicates stronger negative sentiment. Click the brain icon to get AI analysis of any criticism.</p>
+              </InfoTooltip>
+            </div>
             {loading ? (
               <SkeletonBar />
             ) : data.criticisms.length === 0 ? (
@@ -442,10 +448,15 @@ export default function InnovationPage() {
 
           {/* Requests — The Opportunity */}
           <div className="bg-surface border border-border rounded-card p-card-padding-lg">
-            <h3 className="text-sm font-semibold mb-4">
-              <span className="text-bullish">Top Requests</span>
-              <span className="text-text-muted ml-2 font-normal text-xs">The Opportunity</span>
-            </h3>
+            <div className="flex items-center gap-1.5 mb-4">
+              <h3 className="text-sm font-semibold">
+                <span className="text-bullish">Top Requests</span>
+                <span className="text-text-muted ml-2 font-normal text-xs">The Opportunity</span>
+              </h3>
+              <InfoTooltip title="Top Requests">
+                <p>Entities matching feature-request language patterns (wish, want, need, should, missing) or tagged as PRODUCT/TECHNOLOGY entities. These represent consumer demand signals and unmet needs. Higher volume means more people are asking for this. Use these to validate product roadmap priorities.</p>
+              </InfoTooltip>
+            </div>
             {loading ? (
               <SkeletonBar />
             ) : data.requests.length === 0 ? (
@@ -514,9 +525,12 @@ export default function InnovationPage() {
 
         {/* ── Innovation Gap Map ── */}
         <div className="bg-surface border border-border rounded-card p-card-padding-lg">
-          <h3 className="text-sm font-semibold text-text-secondary mb-4">
-            Innovation Gap Map
-          </h3>
+          <div className="flex items-center gap-1.5 mb-4">
+            <h3 className="text-sm font-semibold text-text-secondary">Innovation Gap Map</h3>
+            <InfoTooltip title="Innovation Gap Map">
+              <p>Scatter plot mapping satisfaction (X) against importance (Y). The top-left quadrant (Innovation Zone) contains features that are important to users but currently unsatisfying — these are the highest-value opportunities to build. Bubble size reflects mention volume. Green dots are in the Innovation Zone.</p>
+            </InfoTooltip>
+          </div>
           {loading ? (
             <SkeletonScatter />
           ) : data.gap_map.length === 0 ? (
@@ -679,9 +693,12 @@ export default function InnovationPage() {
         {/* ── Trending Topics ── */}
         {data.trending_topics.length > 0 && (
           <div className="bg-surface border border-border rounded-card p-card-padding-lg">
-            <h3 className="text-sm font-semibold text-text-secondary mb-4">
-              Trending Topics
-            </h3>
+            <div className="flex items-center gap-1.5 mb-4">
+              <h3 className="text-sm font-semibold text-text-secondary">Trending Topics</h3>
+              <InfoTooltip title="Trending Topics">
+                <p>Most frequently mentioned keywords across all monitored entities. Larger text indicates higher frequency. These reveal emerging themes and trends in real-time. Use these to spot new market narratives before they become mainstream.</p>
+              </InfoTooltip>
+            </div>
             <div className="flex flex-wrap gap-2">
               {data.trending_topics.map((topic) => {
                 const ratio = topic.count / maxTopicCount;
@@ -704,9 +721,12 @@ export default function InnovationPage() {
 
         {/* ── Recent Insights Feed ── */}
         <div className="bg-surface border border-border rounded-card p-card-padding-lg">
-          <h3 className="text-sm font-semibold text-text-secondary mb-4">
-            Recent Insights
-          </h3>
+          <div className="flex items-center gap-1.5 mb-4">
+            <h3 className="text-sm font-semibold text-text-secondary">Recent Insights</h3>
+            <InfoTooltip title="Recent Insights">
+              <p>Latest documents from the pipeline&apos;s product-related sources (Reddit, HN, Trustpilot, Amazon, ProductHunt). These are the raw signals feeding the analysis above. Click external links to read the source material.</p>
+            </InfoTooltip>
+          </div>
           {loading ? (
             <div className="space-y-3">
               {Array.from({ length: 4 }).map((_, i) => (

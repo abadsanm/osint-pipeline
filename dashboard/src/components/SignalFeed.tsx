@@ -4,6 +4,7 @@ import { useState } from "react";
 import { MoreHorizontal, Send, ChevronRight, ExternalLink, Brain } from "lucide-react";
 import Link from "next/link";
 import AnalysisModal from "./AnalysisModal";
+import InfoTooltip from "./InfoTooltip";
 
 interface Signal {
   id: string;
@@ -63,9 +64,14 @@ export default function SignalFeed({ signals }: SignalFeedProps) {
   return (
     <div className="card flex flex-col h-full min-h-0 overflow-hidden">
       <div className="flex items-center justify-between mb-1">
-        <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
-          Signal Feed
-        </h2>
+        <div className="flex items-center gap-1.5">
+          <h2 className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
+            Signal Feed
+          </h2>
+          <InfoTooltip title="Signal Feed">
+            <p>Real-time feed of correlated signals detected by the cross-correlation engine. Each signal represents an entity mentioned across multiple independent sources simultaneously. Red dots = anomaly detected, green dots = high confidence, blue dots = volume spike.</p>
+          </InfoTooltip>
+        </div>
         <button className="text-text-muted hover:text-text-primary p-0.5">
           <MoreHorizontal size={14} />
         </button>

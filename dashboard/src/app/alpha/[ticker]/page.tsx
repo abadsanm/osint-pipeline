@@ -6,7 +6,8 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Header from "@/components/Header";
 import SourceTicker from "@/components/SourceTicker";
 import AnalysisModal from "@/components/AnalysisModal";
-import { Brain, ArrowLeft, ExternalLink, AlertTriangle, Loader2, Cpu, RefreshCw, CheckCircle, XCircle, Info, X } from "lucide-react";
+import InfoTooltip from "@/components/InfoTooltip";
+import { Brain, ArrowLeft, ExternalLink, AlertTriangle, Loader2, Cpu, RefreshCw, CheckCircle, XCircle, Info } from "lucide-react";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -20,41 +21,6 @@ import {
   BarChart,
   Cell,
 } from "recharts";
-
-// ---------------------------------------------------------------------------
-// InfoTooltip
-// ---------------------------------------------------------------------------
-
-function InfoTooltip({ title, children }: { title: string; children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="relative inline-block">
-      <button
-        onClick={() => setOpen(!open)}
-        className="text-text-muted hover:text-accent-blue transition-colors p-0.5"
-        title={title}
-      >
-        <Info size={13} />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-6 z-50 w-72 bg-surface-alt border border-border rounded-lg p-3 shadow-lg">
-            <div className="flex items-center justify-between mb-1.5">
-              <h4 className="text-xs font-semibold text-text-primary">{title}</h4>
-              <button onClick={() => setOpen(false)} className="text-text-muted hover:text-text-primary">
-                <X size={11} />
-              </button>
-            </div>
-            <div className="text-[11px] text-text-muted leading-relaxed space-y-1.5">
-              {children}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -462,7 +428,7 @@ function BollingerCard({ bb }: { bb: AlphaData["technicals"]["bb"] }) {
           <p>Shows where the current price sits within its volatility range.</p>
           <p>0% = at the lower band (2 standard deviations below average). 100% = at the upper band (2 standard deviations above).</p>
           <p>Below 20% often signals oversold conditions; above 80% signals overbought.</p>
-          <p>Bands widen during volatility, narrow during consolidation (a "squeeze" often precedes a big move).</p>
+          <p>Bands widen during volatility, narrow during consolidation (a &ldquo;squeeze&rdquo; often precedes a big move).</p>
           <p>Upper/Middle/Lower values show the actual price levels of the bands.</p>
         </InfoTooltip>
       </div>
@@ -712,7 +678,7 @@ function VolumeProfile({
           <InfoTooltip title="Volume Profile (Price x Volume)">
             <p>Horizontal histogram showing how much volume traded at each price level.</p>
             <p>POC (Point of Control): The price where most volume traded — acts as a magnet.</p>
-            <p>Value Area (blue bars): Price range containing 70% of all volume — where "fair value" lives.</p>
+            <p>Value Area (blue bars): Price range containing 70% of all volume — where &ldquo;fair value&rdquo; lives.</p>
           </InfoTooltip>
         </div>
         <div className="flex-1 flex items-center justify-center">
@@ -753,7 +719,7 @@ function VolumeProfile({
         <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Volume Profile</h3>
         <InfoTooltip title="Volume Profile (Price x Volume)">
           <p>Horizontal histogram showing how much volume traded at each price level.</p>
-          <p>POC (Point of Control): The price where most volume traded — acts as a magnet. Value Area (blue bars): Price range containing 70% of all volume — where "fair value" lives.</p>
+          <p>POC (Point of Control): The price where most volume traded — acts as a magnet. Value Area (blue bars): Price range containing 70% of all volume — where &ldquo;fair value&rdquo; lives.</p>
           <p>If current price is above the value area, the market may be overextended. If price approaches POC from above or below, expect support/resistance at that level.</p>
           <p>Thin volume areas (gaps in the profile) often see fast price moves through them.</p>
         </InfoTooltip>

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import * as d3 from "d3";
 import { MoreHorizontal } from "lucide-react";
 import AnalysisModal from "./AnalysisModal";
+import InfoTooltip from "./InfoTooltip";
 
 interface SampleDoc {
   title: string;
@@ -250,9 +251,14 @@ export default function HeatSphere({ data }: HeatSphereProps) {
   return (
     <div ref={containerRef} className="card relative w-full h-full overflow-hidden">
       <div className="flex items-center justify-between mb-1">
-        <h2 className="text-sm font-semibold text-text-secondary">
-          Sentiment Heat-Sphere
-        </h2>
+        <div className="flex items-center gap-1.5">
+          <h2 className="text-sm font-semibold text-text-secondary">
+            Sentiment Heat-Sphere
+          </h2>
+          <InfoTooltip title="Sentiment Heat-Sphere">
+            <p>Interactive visualization of entity sentiment and volume. Bubble size = mention count, color = sentiment (green = bullish, red = bearish). Entity types are distinguished by border color (blue = stock, purple = company, green = product). Click any bubble for AI-powered analysis.</p>
+          </InfoTooltip>
+        </div>
         <button className="text-text-muted hover:text-text-primary p-1">
           <MoreHorizontal size={16} />
         </button>

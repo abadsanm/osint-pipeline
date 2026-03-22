@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import Header from "@/components/Header";
 import SourceTicker from "@/components/SourceTicker";
+import InfoTooltip from "@/components/InfoTooltip";
 import { useBacktestResults } from "@/hooks/useApiData";
 import { ChevronUp, ChevronDown } from "lucide-react";
 import {
@@ -222,25 +223,45 @@ export default function BacktestingPage() {
           {/* ---- Four Headline Stat Cards ---- */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             <div className="bg-surface border border-border rounded-card p-card-padding">
-              <p className="text-text-muted text-xs uppercase tracking-wide mb-1">Accuracy</p>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-text-muted text-xs uppercase tracking-wide">Accuracy</p>
+                <InfoTooltip title="Accuracy">
+                  <p>Percentage of backtested predictions that correctly predicted the price direction. This is the primary metric. Above 55% is significant for financial markets. Note: backtesting uses synthetic sentiment features derived from price/volume patterns, so live accuracy may differ.</p>
+                </InfoTooltip>
+              </div>
               <p className="font-mono text-[28px] font-semibold text-bullish">
                 {(r.accuracy * 100).toFixed(1)}%
               </p>
             </div>
             <div className="bg-surface border border-border rounded-card p-card-padding">
-              <p className="text-text-muted text-xs uppercase tracking-wide mb-1">Sharpe Ratio</p>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-text-muted text-xs uppercase tracking-wide">Sharpe Ratio</p>
+                <InfoTooltip title="Sharpe Ratio">
+                  <p>Risk-adjusted return metric. Sharpe = (mean return - risk-free rate) / std deviation of returns. Above 1.0 is good, above 2.0 is excellent. This measures how much return you get per unit of risk if you traded every signal.</p>
+                </InfoTooltip>
+              </div>
               <p className="font-mono text-[28px] font-semibold text-accent-blue">
                 {r.sharpe_ratio.toFixed(2)}
               </p>
             </div>
             <div className="bg-surface border border-border rounded-card p-card-padding">
-              <p className="text-text-muted text-xs uppercase tracking-wide mb-1">Profit Factor</p>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-text-muted text-xs uppercase tracking-wide">Profit Factor</p>
+                <InfoTooltip title="Profit Factor">
+                  <p>Gross profits divided by gross losses from all predicted trades. Above 1.0 means profitable overall. Above 1.5 is strong. This captures not just win rate but also the magnitude of wins vs losses.</p>
+                </InfoTooltip>
+              </div>
               <p className="font-mono text-[28px] font-semibold text-text-secondary">
                 {r.profit_factor.toFixed(2)}
               </p>
             </div>
             <div className="bg-surface border border-border rounded-card p-card-padding">
-              <p className="text-text-muted text-xs uppercase tracking-wide mb-1">Max Drawdown</p>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-text-muted text-xs uppercase tracking-wide">Max Drawdown</p>
+                <InfoTooltip title="Max Drawdown">
+                  <p>Largest peak-to-trough decline in cumulative returns during the backtest period. Measures the worst-case loss if you followed every signal. Lower is better. Professional systems target max drawdown below 15%.</p>
+                </InfoTooltip>
+              </div>
               <p className="font-mono text-[28px] font-semibold text-bearish">
                 {r.max_drawdown.toFixed(1)}%
               </p>
@@ -249,7 +270,12 @@ export default function BacktestingPage() {
 
           {/* ---- Calibration Curve (full width) ---- */}
           <div className="bg-surface border border-border rounded-card p-card-padding-lg">
-            <h2 className="text-text-primary font-semibold text-sm mb-3">Calibration Curve</h2>
+            <div className="flex items-center gap-1.5 mb-3">
+              <h2 className="text-text-primary font-semibold text-sm">Calibration Curve</h2>
+              <InfoTooltip title="Calibration Curve">
+                <p>Shows how calibration improved after isotonic regression. The red dashed line is the raw model output (before calibration). The green solid line is after calibration. The diagonal represents perfect calibration. The gap between the two lines shows how much the calibration step improved confidence estimates.</p>
+              </InfoTooltip>
+            </div>
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={calibrationData} margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
@@ -312,7 +338,12 @@ export default function BacktestingPage() {
 
             {/* Feature Importances */}
             <div className="bg-surface border border-border rounded-card p-card-padding-lg">
-              <h2 className="text-text-primary font-semibold text-sm mb-3">Feature Importances</h2>
+              <div className="flex items-center gap-1.5 mb-3">
+                <h2 className="text-text-primary font-semibold text-sm">Feature Importances</h2>
+                <InfoTooltip title="Feature Importances">
+                  <p>Which input features the XGBoost model found most predictive. RSI and MACD histogram are typically the strongest technical signals. Sentiment score from the pipeline and SVC (Sentiment Volume Convergence) capture the social/news edge. Understanding feature importance helps identify which data sources provide the most alpha.</p>
+                </InfoTooltip>
+              </div>
               <div style={{ height: featureData.length * 38 + 30 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
@@ -361,7 +392,12 @@ export default function BacktestingPage() {
 
             {/* Confusion Matrix (3x3 CSS Grid) */}
             <div className="bg-surface border border-border rounded-card p-card-padding-lg">
-              <h2 className="text-text-primary font-semibold text-sm mb-3">Confusion Matrix</h2>
+              <div className="flex items-center gap-1.5 mb-3">
+                <h2 className="text-text-primary font-semibold text-sm">Confusion Matrix</h2>
+                <InfoTooltip title="Confusion Matrix">
+                  <p>Shows prediction accuracy by category. Rows are predicted directions, columns are actual outcomes. Diagonal cells (green) are correct predictions. Off-diagonal cells (red) are errors. This reveals if the model has a directional bias — e.g., if it predicts &apos;bullish&apos; too often, or if it&apos;s better at predicting downside than upside.</p>
+                </InfoTooltip>
+              </div>
               <p className="text-text-muted text-[11px] mb-4">
                 Predicted (rows) vs Actual outcome (columns)
               </p>
@@ -414,7 +450,12 @@ export default function BacktestingPage() {
 
           {/* ---- Per-Ticker Performance Table ---- */}
           <div className="bg-surface border border-border rounded-card p-card-padding-lg">
-            <h2 className="text-text-primary font-semibold text-sm mb-3">Per-Ticker Performance</h2>
+            <div className="flex items-center gap-1.5 mb-3">
+              <h2 className="text-text-primary font-semibold text-sm">Per-Ticker Performance</h2>
+              <InfoTooltip title="Per-Ticker Performance">
+                <p>Individual ticker performance during the backtest. Some tickers are more predictable than others — high-volume, heavily-discussed tickers (SPY, AAPL) tend to have better accuracy because the pipeline captures more diverse signals for them. Use this to identify which tickers the model is strongest on.</p>
+              </InfoTooltip>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
