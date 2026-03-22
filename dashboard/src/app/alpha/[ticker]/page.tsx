@@ -261,7 +261,7 @@ function RSIGauge({ value }: { value: number | null }) {
           fontFamily="Roboto Mono, monospace"
           fontWeight="600"
         >
-          {value !== null ? value.toFixed(1) : "--"}
+          {value != null ? value.toFixed(1) : "--"}
         </text>
       </svg>
       {/* Zone labels */}
@@ -403,7 +403,7 @@ function BollingerCard({ bb }: { bb: AlphaData["technicals"]["bb"] }) {
     );
   }
 
-  const pctb = Math.max(0, Math.min(1, bb.pctb));
+  const pctb = Math.max(0, Math.min(1, bb.pctb ?? 0.5));
   const pctbDisplay = (pctb * 100).toFixed(1);
 
   // Color zones
