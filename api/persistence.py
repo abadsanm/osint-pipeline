@@ -126,6 +126,28 @@ class SentinelDB:
                 key   TEXT PRIMARY KEY,
                 value TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS research_items (
+                id TEXT PRIMARY KEY,
+                entity_id TEXT NOT NULL,
+                entity_label TEXT NOT NULL,
+                action TEXT NOT NULL,
+                source_context TEXT,
+                priority TEXT DEFAULT 'medium',
+                status TEXT DEFAULT 'active',
+                notes TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_analysis TEXT,
+                alert_count INTEGER DEFAULT 0,
+                sentiment_at_creation REAL,
+                current_sentiment REAL,
+                mention_count_at_creation INTEGER DEFAULT 0,
+                current_mention_count INTEGER DEFAULT 0
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_research_status
+                ON research_items(status, priority);
         """)
         self._conn.commit()
 
@@ -475,6 +497,105 @@ class SentinelDB:
         return result
 
     # ------------------------------------------------------------------
+    # Research Items
+    # ------------------------------------------------------------------
+
+    def add_research_item(self, item: dict):
+        """Insert a research item."""
+        self._conn.execute(
+            """INSERT OR IGNORE INTO research_items
+               (id, entity_id, entity_label, action, source_context, priority,
+                status, notes, created_at, updated_at, last_analysis,
+                alert_count, sentiment_at_creation, current_sentiment,
+                mention_count_at_creation, current_mention_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                item.get("id", ""),
+                item.get("entity_id", ""),
+                item.get("entity_label", ""),
+                item.get("action", ""),
+                item.get("source_context", ""),
+                item.get("priority", "medium"),
+                item.get("status", "active"),
+                item.get("notes", ""),
+                item.get("created_at", ""),
+                item.get("updated_at", ""),
+                item.get("last_analysis"),
+                item.get("alert_count", 0),
+                item.get("sentiment_at_creation"),
+                item.get("current_sentiment"),
+                item.get("mention_count_at_creation", 0),
+                item.get("current_mention_count", 0),
+            ),
+        )
+        self._conn.commit()
+
+    def get_research_items(self, status: str = None, limit: int = 50) -> list[dict]:
+        """Return research items, optionally filtered by status."""
+        if status:
+            rows = self._conn.execute(
+                """SELECT * FROM research_items
+                   WHERE status = ?
+                   ORDER BY
+                       CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1
+                            WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
+                       updated_at DESC
+                   LIMIT ?""",
+                (status, limit),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """SELECT * FROM research_items
+                   ORDER BY
+                       CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1
+                            WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
+                       updated_at DESC
+                   LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def update_research_item(self, item_id: str, updates: dict):
+        """Update specific fields on a research item."""
+        if not updates:
+            return
+        allowed = {
+            "entity_label", "action", "source_context", "priority", "status",
+            "notes", "updated_at", "last_analysis", "alert_count",
+            "current_sentiment", "current_mention_count",
+        }
+        filtered = {k: v for k, v in updates.items() if k in allowed}
+        if not filtered:
+            return
+
+        set_clause = ", ".join(f"{k} = ?" for k in filtered)
+        values = list(filtered.values()) + [item_id]
+        self._conn.execute(
+            f"UPDATE research_items SET {set_clause} WHERE id = ?",
+            values,
+        )
+        self._conn.commit()
+
+    def delete_research_item(self, item_id: str):
+        """Delete a research item by id."""
+        self._conn.execute("DELETE FROM research_items WHERE id = ?", (item_id,))
+        self._conn.commit()
+
+    def get_research_item(self, item_id: str) -> Optional[dict]:
+        """Return a single research item by id, or None."""
+        row = self._conn.execute(
+            "SELECT * FROM research_items WHERE id = ?", (item_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+    def get_watched_entities(self) -> set[str]:
+        """Return entity_ids of all active research items (for alert sensitivity)."""
+        rows = self._conn.execute(
+            "SELECT entity_id FROM research_items WHERE status = 'active'"
+        ).fetchall()
+        return {r["entity_id"].upper() for r in rows}
+
+    # ------------------------------------------------------------------
     # Maintenance
     # ------------------------------------------------------------------
 
@@ -486,6 +607,7 @@ class SentinelDB:
             ("signals", "timestamp"),
             ("alerts", "timestamp"),
             ("backtest_records", "timestamp"),
+            ("research_items", "updated_at"),
         ]
         total = 0
         for table, col in tables_ts_col:

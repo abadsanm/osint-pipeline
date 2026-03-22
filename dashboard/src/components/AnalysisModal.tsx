@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Loader2, TrendingUp, Lightbulb, ExternalLink, Brain } from "lucide-react";
+import { X, Loader2, TrendingUp, Lightbulb, ExternalLink, Brain, Crosshair, Check } from "lucide-react";
 import Link from "next/link";
 
 interface AnalysisModalProps {
@@ -32,6 +32,8 @@ export default function AnalysisModal({
   const [loading, setLoading] = useState(true);
   const [model, setModel] = useState("");
   const [error, setError] = useState("");
+  const [tracked, setTracked] = useState(false);
+  const [tracking, setTracking] = useState(false);
 
   useEffect(() => {
     const fetchAnalysis = async () => {
@@ -112,6 +114,33 @@ export default function AnalysisModal({
     fetchAnalysis();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entity.id, contextType]);
+
+  const handleTrack = async () => {
+    setTracking(true);
+    try {
+      const sourceContext = analysis ? analysis.substring(0, 200) : "";
+      const res = await fetch(`${API_BASE}/research`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entity_id: entity.id,
+          entity_label: entity.label,
+          action: "Track for follow-up from AI analysis",
+          source_context: sourceContext,
+          priority: "medium",
+          sentiment: entity.sentiment,
+          mention_count: entity.volume,
+        }),
+      });
+      if (res.ok) {
+        setTracked(true);
+        setTimeout(() => setTracked(false), 2500);
+      }
+    } catch {
+      // API unavailable
+    }
+    setTracking(false);
+  };
 
   const sentimentColor =
     entity.sentiment > 0.6
@@ -315,6 +344,32 @@ export default function AnalysisModal({
               <Lightbulb size={12} />
               Product Ideation
             </Link>
+            <button
+              onClick={handleTrack}
+              disabled={tracking || tracked}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                tracked
+                  ? "bg-bullish/10 text-bullish border-bullish/20"
+                  : "bg-surface-alt text-text-muted border-border hover:text-text-primary hover:border-accent-blue/30"
+              } disabled:cursor-not-allowed`}
+            >
+              {tracked ? (
+                <>
+                  <Check size={12} />
+                  Tracked!
+                </>
+              ) : tracking ? (
+                <>
+                  <Loader2 size={12} className="animate-spin" />
+                  Tracking...
+                </>
+              ) : (
+                <>
+                  <Crosshair size={12} />
+                  Track This
+                </>
+              )}
+            </button>
           </div>
           <button
             onClick={onClose}

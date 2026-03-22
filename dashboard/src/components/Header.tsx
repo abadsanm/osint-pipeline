@@ -1,10 +1,11 @@
 "use client";
 
-import { Search, LayoutGrid, Bell, X } from "lucide-react";
+import { Search, LayoutGrid, Bell, X, Crosshair } from "lucide-react";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import ChatPanel from "./ChatPanel";
 import NotesPanel from "./NotesPanel";
+import ResearchPanel from "./ResearchPanel";
 
 interface HeaderProps {
   title: string;
@@ -64,6 +65,7 @@ export default function Header({ title }: HeaderProps) {
   // Panel state
   const [chatOpen, setChatOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [researchOpen, setResearchOpen] = useState(false);
 
   // Timer
   useEffect(() => {
@@ -272,7 +274,7 @@ export default function Header({ title }: HeaderProps) {
 
           <div className="w-px h-5 bg-border mx-1" />
           <button
-            onClick={() => { setChatOpen(true); setNotesOpen(false); }}
+            onClick={() => { setChatOpen(true); setNotesOpen(false); setResearchOpen(false); }}
             className={`px-3 py-1.5 text-xs border border-border rounded-md transition-colors ${
               chatOpen ? "text-bullish border-bullish/30 bg-bullish/10" : "text-text-muted hover:text-text-primary"
             }`}
@@ -280,12 +282,21 @@ export default function Header({ title }: HeaderProps) {
             Chat
           </button>
           <button
-            onClick={() => { setNotesOpen(true); setChatOpen(false); }}
+            onClick={() => { setNotesOpen(true); setChatOpen(false); setResearchOpen(false); }}
             className={`px-3 py-1.5 text-xs border border-border rounded-md transition-colors ${
               notesOpen ? "text-bullish border-bullish/30 bg-bullish/10" : "text-text-muted hover:text-text-primary"
             }`}
           >
             Note
+          </button>
+          <button
+            onClick={() => { setResearchOpen(true); setChatOpen(false); setNotesOpen(false); }}
+            className={`flex items-center gap-1 px-3 py-1.5 text-xs border border-border rounded-md transition-colors ${
+              researchOpen ? "text-bullish border-bullish/30 bg-bullish/10" : "text-text-muted hover:text-text-primary"
+            }`}
+          >
+            <Crosshair size={12} />
+            Research
           </button>
           <div className="w-px h-5 bg-border mx-1" />
           <div className="w-7 h-7 rounded-full bg-accent-blue/20 border border-accent-blue/30 flex items-center justify-center">
@@ -421,12 +432,13 @@ export default function Header({ title }: HeaderProps) {
       {/* Slide-out panels */}
       <ChatPanel open={chatOpen} onClose={() => setChatOpen(false)} />
       <NotesPanel open={notesOpen} onClose={() => setNotesOpen(false)} />
+      <ResearchPanel open={researchOpen} onClose={() => setResearchOpen(false)} />
 
       {/* Backdrop for panels */}
-      {(chatOpen || notesOpen) && (
+      {(chatOpen || notesOpen || researchOpen) && (
         <div
           className="fixed inset-0 bg-black/30 z-40"
-          onClick={() => { setChatOpen(false); setNotesOpen(false); }}
+          onClick={() => { setChatOpen(false); setNotesOpen(false); setResearchOpen(false); }}
         />
       )}
     </>

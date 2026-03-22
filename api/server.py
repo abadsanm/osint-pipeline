@@ -476,6 +476,47 @@ def _evaluate_alerts(signal_entry: dict):
     sig_type = signal_entry.get("type", "")
     timestamp = signal_entry.get("timestamp", datetime.now(timezone.utc).isoformat())
 
+    # Lower thresholds for watched entities (research queue items)
+    try:
+        watched = db.get_watched_entities() if db else set()
+    except Exception:
+        watched = set()
+    is_watched = ticker.upper() in watched
+
+    if is_watched:
+        # Always alert for watched entities — any new signal is noteworthy
+        dedup_key = ("research_update", ticker)
+        last_fired = _alert_dedup.get(dedup_key, 0)
+        if now - last_fired >= _ALERT_DEDUP_WINDOW:
+            _alert_dedup[dedup_key] = now
+            alert_entry = {
+                "id": uuid.uuid4().hex[:12],
+                "type": "research_update",
+                "priority": "high",
+                "ticker": ticker,
+                "headline": headline,
+                "message": f"New signal for watched entity: {headline}",
+                "timestamp": timestamp,
+                "read": False,
+            }
+            alerts.append(alert_entry)
+            try:
+                db.add_alert(alert_entry)
+            except Exception as e:
+                log.debug("DB add_alert (research_update) failed: %s", e)
+
+    # Update watched items' current_mention_count when new signals come in
+    if is_watched and db:
+        try:
+            for item in db.get_research_items(status="active"):
+                if item["entity_id"].upper() == ticker.upper():
+                    db.update_research_item(item["id"], {
+                        "current_mention_count": item.get("current_mention_count", 0) + 1,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    })
+        except Exception as e:
+            log.debug("DB update research item mention count failed: %s", e)
+
     # Collect all alerts that should fire for this signal
     pending: list[tuple[str, str, str]] = []  # (alert_type, priority, message)
 
@@ -982,6 +1023,133 @@ def get_setting(key: str):
     if key not in _settings:
         raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
     return {key: _settings[key]}
+
+
+# ---------------------------------------------------------------------------
+# Research Queue endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/research")
+def get_research_items(status: Optional[str] = Query(None), limit: int = Query(50)):
+    """Get research items, optionally filtered by status."""
+    items = db.get_research_items(status=status, limit=limit)
+    return {"items": items, "count": len(items)}
+
+
+@app.post("/api/research")
+def create_research_item(request: dict):
+    """Create a new research item from AI analysis.
+
+    Body: {entity_id, entity_label, action, source_context, priority, sentiment, mention_count}
+    Auto-generates id and timestamps.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    item = {
+        "id": uuid.uuid4().hex[:12],
+        "entity_id": request.get("entity_id", ""),
+        "entity_label": request.get("entity_label", ""),
+        "action": request.get("action", ""),
+        "source_context": request.get("source_context", ""),
+        "priority": request.get("priority", "medium"),
+        "status": "active",
+        "notes": request.get("notes", ""),
+        "created_at": now,
+        "updated_at": now,
+        "last_analysis": None,
+        "alert_count": 0,
+        "sentiment_at_creation": request.get("sentiment"),
+        "current_sentiment": request.get("sentiment"),
+        "mention_count_at_creation": request.get("mention_count", 0),
+        "current_mention_count": request.get("mention_count", 0),
+    }
+    db.add_research_item(item)
+    return item
+
+
+@app.put("/api/research/{item_id}")
+def update_research_item(item_id: str, request: dict):
+    """Update a research item (notes, status, priority)."""
+    existing = db.get_research_item(item_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Research item '{item_id}' not found")
+
+    updates = {k: v for k, v in request.items() if k in {
+        "notes", "status", "priority", "action", "entity_label", "source_context",
+    }}
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    db.update_research_item(item_id, updates)
+    return db.get_research_item(item_id)
+
+
+@app.delete("/api/research/{item_id}")
+def delete_research_item(item_id: str):
+    """Delete a research item."""
+    existing = db.get_research_item(item_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Research item '{item_id}' not found")
+    db.delete_research_item(item_id)
+    return {"deleted": item_id}
+
+
+@app.post("/api/research/{item_id}/reanalyze")
+async def reanalyze_research_item(item_id: str):
+    """Trigger re-analysis for a research item using current pipeline data.
+
+    Fetches current entity data, calls Claude for fresh analysis,
+    updates the item's last_analysis and current_sentiment/mention_count.
+    """
+    existing = db.get_research_item(item_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Research item '{item_id}' not found")
+
+    entity_id = existing["entity_id"]
+
+    # Look up the entity in entity_mentions (under _lock)
+    with _lock:
+        entity_data = entity_mentions.get(entity_id, {}).copy()
+
+    # Also try the DB if not in memory
+    if not entity_data:
+        entity_data = db.get_entity(entity_id) or {}
+
+    current_volume = entity_data.get("volume", 0)
+    sentiment_sum = entity_data.get("sentiment_sum", 0.0)
+    sentiment_count = entity_data.get("sentiment_count", 0)
+    current_sentiment = (sentiment_sum / sentiment_count) if sentiment_count > 0 else 0.5
+    sources = entity_data.get("sources", {})
+    keywords = entity_data.get("keywords", [])
+    sample_docs = entity_data.get("sample_docs", [])
+
+    # Build context dict matching /api/analyze format
+    analysis_request = {
+        "entity_id": entity_id,
+        "label": existing["entity_label"],
+        "sentiment": current_sentiment,
+        "volume": current_volume,
+        "sources": sources,
+        "keywords": keywords,
+        "sampleDocs": sample_docs,
+        "context_type": "entity",
+    }
+
+    # Call the same analysis logic as /api/analyze
+    analysis_result = await analyze_entity(analysis_request)
+
+    # Update the research item with fresh data
+    now = datetime.now(timezone.utc).isoformat()
+    db.update_research_item(item_id, {
+        "last_analysis": analysis_result.get("analysis", ""),
+        "current_sentiment": current_sentiment,
+        "current_mention_count": current_volume,
+        "updated_at": now,
+    })
+
+    updated = db.get_research_item(item_id)
+    return {
+        "item": updated,
+        "analysis": analysis_result,
+    }
 
 
 @app.get("/api/sectors")
