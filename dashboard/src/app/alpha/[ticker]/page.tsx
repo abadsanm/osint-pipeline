@@ -1661,6 +1661,29 @@ export default function FinancialAlphaPage() {
               {sentBadgeText} {Math.round(sentimentScore * 100)}%
             </div>
 
+            {/* Add to Watchlist button */}
+            <button
+              onClick={async () => {
+                try {
+                  const res = await fetch(`${API_BASE}/settings`);
+                  if (!res.ok) return;
+                  const settings = await res.json();
+                  const wl: string[] = settings.watchlist || [];
+                  if (!wl.includes(ticker)) {
+                    await fetch(`${API_BASE}/settings`, {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ watchlist: [...wl, ticker] }),
+                    });
+                  }
+                } catch { /* ignore */ }
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-surface-alt text-text-muted border border-border rounded-md hover:text-bullish hover:border-bullish/30 transition-colors"
+              title="Add to watchlist"
+            >
+              + Watch
+            </button>
+
             {/* AI Analysis button */}
             <button
               onClick={() => setShowAnalysis(true)}

@@ -266,6 +266,31 @@ export default function SettingsPage() {
               >
                 <Save size={13} /> Save
               </button>
+              <button
+                onClick={async () => {
+                  setToast("Training ML on watchlist...");
+                  try {
+                    const res = await fetch(`${API_BASE}/ml/train-watchlist`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ tickers: settings.watchlist }),
+                    });
+                    if (res.ok) {
+                      const data = await res.json();
+                      if (data.status === "trained") {
+                        setToast(`ML trained: ${data.accuracy_1d ? (data.accuracy_1d * 100).toFixed(0) : '?'}% 1D, ${data.accuracy_5d ? (data.accuracy_5d * 100).toFixed(0) : '?'}% 5D accuracy on ${data.labeled} samples`);
+                      } else {
+                        setToast(data.message || "Training incomplete");
+                      }
+                    }
+                  } catch {
+                    setToast("Training failed — check API");
+                  }
+                }}
+                className="flex items-center gap-1.5 bg-bullish/20 border border-bullish/40 text-bullish rounded-card px-3 py-1.5 text-sm font-medium hover:bg-bullish/30 transition-colors"
+              >
+                <Activity size={13} /> Train ML
+              </button>
             </div>
           </SectionCard>
 
