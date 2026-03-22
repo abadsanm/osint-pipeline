@@ -17,21 +17,31 @@ interface SearchResult {
   sentiment: number;
 }
 
-interface Notification {
+interface Alert {
   id: string;
-  type: "bullish" | "bearish" | "volume";
+  type: "high_confidence" | "volume_spike" | "convergence" | "anomaly" | "insider";
+  priority: "high" | "medium" | "low";
   ticker: string;
   headline: string;
+  message: string;
   timestamp: string;
-  confidence: number;
+  read: boolean;
 }
 
 const API_BASE = "http://localhost:8000/api";
 
-const dotColor: Record<string, string> = {
-  bullish: "bg-bullish",
-  bearish: "bg-bearish",
-  volume: "bg-volume-spike",
+const priorityDotColor: Record<string, string> = {
+  high: "bg-bearish",
+  medium: "bg-volume-spike",
+  low: "bg-neutral",
+};
+
+const alertTypeLabel: Record<string, string> = {
+  high_confidence: "HIGH CONF",
+  volume_spike: "VOLUME",
+  convergence: "CONVERGENCE",
+  anomaly: "ANOMALY",
+  insider: "INSIDER",
 };
 
 export default function Header({ title }: HeaderProps) {
@@ -46,7 +56,7 @@ export default function Header({ title }: HeaderProps) {
   const searchRef = useRef<HTMLDivElement>(null);
 
   // Notifications state
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notifications, setNotifications] = useState<Alert[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifCount, setNotifCount] = useState(0);
   const notifRef = useRef<HTMLDivElement>(null);
@@ -99,11 +109,11 @@ export default function Header({ title }: HeaderProps) {
   // Fetch notifications
   const fetchNotifications = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/signals?limit=10`);
+      const res = await fetch(`${API_BASE}/alerts?limit=20&unread_only=false`);
       if (res.ok) {
-        const data = await res.json();
+        const data: Alert[] = await res.json();
         setNotifications(data);
-        setNotifCount(data.length);
+        setNotifCount(data.filter((a) => !a.read).length);
       }
     } catch {
       // API unavailable
@@ -188,12 +198,25 @@ export default function Header({ title }: HeaderProps) {
                   <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
                     Recent Alerts
                   </span>
-                  <button
-                    onClick={() => setShowNotifications(false)}
-                    className="text-text-muted hover:text-text-primary p-0.5"
-                  >
-                    <X size={12} />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={async () => {
+                        try {
+                          await fetch(`${API_BASE}/alerts/read-all`, { method: "POST" });
+                          fetchNotifications();
+                        } catch { /* ignore */ }
+                      }}
+                      className="text-[10px] text-accent-blue hover:text-bullish transition-colors"
+                    >
+                      Mark all read
+                    </button>
+                    <button
+                      onClick={() => setShowNotifications(false)}
+                      className="text-text-muted hover:text-text-primary p-0.5"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
                 </div>
                 <div className="max-h-80 overflow-y-auto">
                   {notifications.length === 0 && (
@@ -204,20 +227,40 @@ export default function Header({ title }: HeaderProps) {
                   {notifications.map((notif, i) => (
                     <button
                       key={`${notif.id}-${i}`}
-                      onClick={() => {
+                      onClick={async () => {
+                        if (!notif.read) {
+                          try {
+                            await fetch(`${API_BASE}/alerts/${notif.id}/read`, { method: "POST" });
+                            fetchNotifications();
+                          } catch { /* ignore */ }
+                        }
                         setShowNotifications(false);
                         const ticker = notif.ticker.replace(/[^a-zA-Z0-9]/g, "");
                         if (ticker) router.push(`/alpha/${ticker}`);
                       }}
-                      className="w-full flex items-start gap-2 px-3 py-2 hover:bg-surface/50 transition-colors text-left border-b border-border/30 last:border-0"
+                      className={`w-full flex items-start gap-2 px-3 py-2 hover:bg-surface/50 transition-colors text-left border-b border-border/30 last:border-0 ${
+                        notif.read ? "opacity-60" : ""
+                      }`}
                     >
                       <span
-                        className={`w-2 h-2 rounded-full flex-shrink-0 mt-1 ${dotColor[notif.type] || "bg-text-muted"}`}
+                        className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${
+                          priorityDotColor[notif.priority] || "bg-text-muted"
+                        }`}
                       />
                       <div className="flex-1 min-w-0">
-                        <p className="text-[11px] text-text-primary leading-tight">
-                          <span className="font-mono font-semibold">{notif.ticker}</span>
-                          <span className="text-text-muted"> {notif.headline}</span>
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <span className="font-mono font-semibold text-[11px] text-text-primary">
+                            {notif.ticker}
+                          </span>
+                          <span className="text-[9px] font-semibold px-1 py-0.5 rounded bg-surface border border-border/50 text-text-muted uppercase tracking-wider">
+                            {alertTypeLabel[notif.type] || notif.type}
+                          </span>
+                          {!notif.read && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-accent-blue flex-shrink-0" />
+                          )}
+                        </div>
+                        <p className="text-[11px] text-text-muted leading-tight truncate">
+                          {notif.message || notif.headline}
                         </p>
                       </div>
                     </button>

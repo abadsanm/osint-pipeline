@@ -68,6 +68,13 @@ recent_docs: dict[str, deque] = defaultdict(lambda: deque(maxlen=MAX_ITEMS))
 # Signals (from correlated topics)
 signals: deque = deque(maxlen=MAX_ITEMS)
 
+# Alerts (evaluated from incoming signals)
+alerts: deque = deque(maxlen=200)
+
+# Alert dedup tracking: {(alert_type, ticker): timestamp} — prevent same alert within 30 min
+_alert_dedup: dict[tuple[str, str], float] = {}
+_ALERT_DEDUP_WINDOW = 30 * 60  # 30 minutes in seconds
+
 # Entity mention counts (for heat sphere)
 entity_mentions: dict[str, dict] = {}
 
@@ -294,6 +301,7 @@ def _consume_signals():
                     existing_keys = {f"{s['ticker']}:{s['headline']}" for s in signals}
                     if dedup_key not in existing_keys:
                         signals.append(signal_entry)
+                        _evaluate_alerts(signal_entry)
 
         except Exception as e:
             log.warning("Failed to process signal message: %s", e)
@@ -325,6 +333,88 @@ def _build_headline(data: dict) -> str:
     if signal_type == "volume_spike":
         return f"Volume spike: {mentions} mentions across {sources} platforms."
     return f"Multi-source signal: {mentions} mentions across {sources} sources."
+
+
+def _evaluate_alerts(signal_entry: dict):
+    """Evaluate a signal and fire alerts if conditions are met. Called under _lock."""
+    now = time.time()
+    ticker = signal_entry.get("ticker", "")
+    confidence = signal_entry.get("confidence", 0)
+    volume = signal_entry.get("volume", 0)
+    sources = signal_entry.get("sources", {})
+    headline = signal_entry.get("headline", "")
+    sig_type = signal_entry.get("type", "")
+    timestamp = signal_entry.get("timestamp", datetime.now(timezone.utc).isoformat())
+
+    # Collect all alerts that should fire for this signal
+    pending: list[tuple[str, str, str]] = []  # (alert_type, priority, message)
+
+    # 1. High Confidence Signal
+    if confidence > 0.75:
+        pending.append((
+            "high_confidence",
+            "high",
+            f"High-confidence signal ({confidence:.0%}) detected for {ticker}.",
+        ))
+
+    # 2. Volume Spike
+    if volume > 20:
+        pending.append((
+            "volume_spike",
+            "medium",
+            f"Volume spike: {volume} mentions for {ticker}.",
+        ))
+
+    # 3. Multi-Source Convergence
+    num_sources = len(sources) if isinstance(sources, dict) else 0
+    if num_sources >= 3:
+        source_names = ", ".join(sources.keys()) if isinstance(sources, dict) else ""
+        pending.append((
+            "convergence",
+            "high",
+            f"{ticker} detected across {num_sources} sources: {source_names}.",
+        ))
+
+    # 4. Anomaly Detection (bearish + moderate confidence)
+    if sig_type == "bearish" and confidence > 0.6:
+        pending.append((
+            "anomaly",
+            "medium",
+            f"Bearish anomaly for {ticker} (confidence {confidence:.0%}).",
+        ))
+
+    # 5. Insider Activity
+    if "insider" in headline.lower():
+        pending.append((
+            "insider",
+            "high",
+            f"Insider activity detected for {ticker}.",
+        ))
+
+    # Deduplicate and append
+    for alert_type, priority, message in pending:
+        dedup_key = (alert_type, ticker)
+        last_fired = _alert_dedup.get(dedup_key, 0)
+        if now - last_fired < _ALERT_DEDUP_WINDOW:
+            continue  # Skip — same alert type + ticker fired recently
+
+        _alert_dedup[dedup_key] = now
+        alerts.append({
+            "id": uuid.uuid4().hex[:12],
+            "type": alert_type,
+            "priority": priority,
+            "ticker": ticker,
+            "headline": headline,
+            "message": message,
+            "timestamp": timestamp,
+            "read": False,
+        })
+
+    # Prune old dedup entries (older than 2x window) to prevent unbounded growth
+    cutoff = now - _ALERT_DEDUP_WINDOW * 2
+    stale_keys = [k for k, v in _alert_dedup.items() if v < cutoff]
+    for k in stale_keys:
+        del _alert_dedup[k]
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +484,45 @@ def get_signals(
             items = list(signals)[-limit:]
     items.reverse()
     return items
+
+
+@app.get("/api/alerts")
+def get_alerts(
+    limit: int = Query(50, ge=1, le=200),
+    unread_only: bool = Query(False, description="Return only unread alerts"),
+):
+    """Recent alerts, newest first."""
+    with _lock:
+        if unread_only:
+            items = [a for a in alerts if not a.get("read", False)]
+        else:
+            items = list(alerts)
+    items = items[-limit:]
+    items.reverse()
+    return items
+
+
+@app.post("/api/alerts/{alert_id}/read")
+def mark_alert_read(alert_id: str):
+    """Mark a single alert as read."""
+    with _lock:
+        for a in alerts:
+            if a["id"] == alert_id:
+                a["read"] = True
+                return {"ok": True, "id": alert_id}
+    return {"ok": False, "error": "alert not found"}
+
+
+@app.post("/api/alerts/read-all")
+def mark_all_alerts_read():
+    """Mark all alerts as read."""
+    with _lock:
+        count = 0
+        for a in alerts:
+            if not a.get("read", False):
+                a["read"] = True
+                count += 1
+    return {"ok": True, "marked": count}
 
 
 @app.get("/api/sectors")
