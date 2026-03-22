@@ -220,6 +220,7 @@ def _consume_raw_topics():
         "finance.sec.insider", "finance.congress.trades",
         "finance.reddit.posts", "finance.reddit.comments",
         "trends.google.interest",
+        "finance.news.articles", "finance.options.flow",
     ]
 
     consumer = Consumer({
