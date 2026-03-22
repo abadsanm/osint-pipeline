@@ -348,16 +348,16 @@ function MACDCard({
           <div className="grid grid-cols-3 gap-2 text-center mb-2">
             <div>
               <p className="text-[10px] text-text-muted">MACD</p>
-              <p className="font-mono text-xs text-text-primary">{macd.value.toFixed(3)}</p>
+              <p className="font-mono text-xs text-text-primary">{macd.value?.toFixed(3) ?? "--"}</p>
             </div>
             <div>
               <p className="text-[10px] text-text-muted">Signal</p>
-              <p className="font-mono text-xs text-text-primary">{macd.signal.toFixed(3)}</p>
+              <p className="font-mono text-xs text-text-primary">{macd.signal?.toFixed(3) ?? "--"}</p>
             </div>
             <div>
               <p className="text-[10px] text-text-muted">Hist</p>
               <p className={`font-mono text-xs ${macd.histogram >= 0 ? "text-bullish" : "text-bearish"}`}>
-                {macd.histogram.toFixed(3)}
+                {macd.histogram?.toFixed(3) ?? "--"}
               </p>
             </div>
           </div>
@@ -489,7 +489,7 @@ function SignalScorecard({ score }: { score: AlphaData["score"] }) {
         {/* Overall score */}
         <div className="flex flex-col items-center flex-shrink-0">
           <p className="font-mono text-4xl font-bold text-text-primary leading-none">
-            {score.overall.toFixed(1)}
+            {score.overall?.toFixed(1) ?? "--"}
           </p>
           <span
             className={`mt-2 px-2.5 py-0.5 rounded-md text-xs font-semibold border capitalize ${dirColor}`}
@@ -1422,7 +1422,7 @@ export default function FinancialAlphaPage() {
     );
   }
 
-  const changePct = data.change_pct;
+  const changePct = data.change_pct ?? 0;
   const changePositive = changePct >= 0;
   const sentimentScore = data.sentiment?.score ?? 0.5;
   const sentimentLabel = data.sentiment?.label ?? "neutral";
@@ -1475,11 +1475,11 @@ export default function FinancialAlphaPage() {
           <div className="flex items-center gap-5">
             {/* Price & change */}
             <div className="text-right">
-              <p className="font-mono text-2xl font-semibold">${data.price.toFixed(2)}</p>
+              <p className="font-mono text-2xl font-semibold">${data.price?.toFixed(2) ?? "--"}</p>
               <p className={`font-mono text-sm ${changePositive ? "text-bullish" : "text-bearish"}`}>
                 {changePositive ? "+" : ""}
-                {data.change_amt.toFixed(2)} ({changePositive ? "+" : ""}
-                {changePct.toFixed(2)}%)
+                {data.change_amt?.toFixed(2) ?? "0.00"} ({changePositive ? "+" : ""}
+                {changePct?.toFixed(2) ?? "0.00"}%)
               </p>
             </div>
 

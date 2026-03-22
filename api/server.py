@@ -1529,57 +1529,113 @@ def get_pulse_charts(
 def search_entities(
     q: str = Query("", min_length=1, max_length=200, description="Search query"),
 ):
-    """Search entity_mentions by id, label, or keywords. Returns top 10 matches."""
+    """Search entity_mentions + ticker lookup + yfinance fallback. Returns top 10 matches."""
     query = q.lower().strip()
     if not query:
         return []
 
+    # Common ticker symbol → company name mapping for search
+    TICKER_MAP = {
+        "aapl": "Apple", "tsla": "Tesla", "msft": "Microsoft", "googl": "Google",
+        "goog": "Google", "amzn": "Amazon", "meta": "Meta", "nvda": "NVIDIA",
+        "spy": "SPY", "qqq": "QQQ", "amd": "AMD", "intc": "Intel",
+        "nflx": "Netflix", "dis": "Disney", "baba": "Alibaba", "jpm": "JPMorgan",
+        "v": "Visa", "ma": "Mastercard", "pypl": "PayPal", "sq": "Square",
+        "crm": "Salesforce", "adbe": "Adobe", "orcl": "Oracle", "ibm": "IBM",
+        "csco": "Cisco", "xom": "Exxon", "cvx": "Chevron", "wmt": "Walmart",
+        "ko": "Coca-Cola", "pep": "PepsiCo", "mrna": "Moderna", "pfe": "Pfizer",
+        "btcusdt": "Bitcoin", "ethusdt": "Ethereum", "solusdt": "Solana",
+    }
+
     results = []
+    seen_ids = set()
+
+    # 1. Search entity_mentions (pipeline data)
     with _lock:
+        # Also search by ticker symbol → try finding the company name
+        search_terms = [query]
+        if query.upper() in {k.upper() for k in TICKER_MAP}:
+            mapped = TICKER_MAP.get(query, "")
+            if mapped:
+                search_terms.append(mapped.lower())
+
         for eid, em in entity_mentions.items():
-            # Score based on match quality
             score = 0
             eid_lower = eid.lower()
             label_lower = (em.get("label") or "").lower()
             keywords_lower = [k.lower() for k in em.get("keywords", [])]
 
-            if query == eid_lower or query == label_lower:
-                score = 100  # Exact match
-            elif query in eid_lower:
-                score = 80
-            elif query in label_lower:
-                score = 60
-            elif any(query in kw for kw in keywords_lower):
-                score = 40
-            else:
-                # Check if any query word matches
-                query_words = query.split()
-                for word in query_words:
-                    if word in eid_lower or word in label_lower:
-                        score = max(score, 30)
-                    elif any(word in kw for kw in keywords_lower):
-                        score = max(score, 20)
+            for term in search_terms:
+                if term == eid_lower or term == label_lower:
+                    score = max(score, 100)
+                elif term in eid_lower:
+                    score = max(score, 80)
+                elif term in label_lower:
+                    score = max(score, 60)
+                elif any(term in kw for kw in keywords_lower):
+                    score = max(score, 40)
+                else:
+                    for word in term.split():
+                        if len(word) < 2:
+                            continue
+                        if word in eid_lower or word in label_lower:
+                            score = max(score, 30)
+                        elif any(word in kw for kw in keywords_lower):
+                            score = max(score, 20)
 
-            if score > 0:
+            if score > 0 and eid not in seen_ids:
                 sentiment = 0.5
                 if em.get("sentiment_count", 0) > 0:
                     sentiment = em["sentiment_sum"] / em["sentiment_count"]
-
+                seen_ids.add(eid)
                 results.append({
                     "id": em["id"],
                     "label": em.get("label", eid),
                     "volume": em.get("volume", 0),
                     "sentiment": round(sentiment, 3),
+                    "source": "pipeline",
                     "_score": score,
-                    "_volume": em.get("volume", 0),
                 })
 
-    # Sort by match quality, then by volume
-    results.sort(key=lambda r: (-r["_score"], -r["_volume"]))
-    # Remove internal scoring fields and limit to 10
+    # 2. If few results, try yfinance ticker lookup as fallback
+    if len(results) < 3:
+        ticker_query = query.upper().strip()
+        # Check if it looks like a ticker (1-5 uppercase letters)
+        if 1 <= len(ticker_query) <= 5 and ticker_query.isalpha():
+            try:
+                import yfinance as yf
+                info = yf.Ticker(ticker_query).info
+                name = info.get("shortName") or info.get("longName")
+                if name and ticker_query not in seen_ids:
+                    price = info.get("currentPrice") or info.get("regularMarketPrice")
+                    results.append({
+                        "id": ticker_query,
+                        "label": f"{ticker_query} — {name}",
+                        "volume": 0,
+                        "sentiment": 0.5,
+                        "source": "yfinance",
+                        "price": round(price, 2) if price else None,
+                        "_score": 90,
+                    })
+            except Exception:
+                pass
+
+        # Also check if query matches a known ticker in our map
+        if query in TICKER_MAP and TICKER_MAP[query].upper() not in seen_ids:
+            company = TICKER_MAP[query]
+            results.append({
+                "id": query.upper(),
+                "label": f"{query.upper()} — {company}",
+                "volume": 0,
+                "sentiment": 0.5,
+                "source": "ticker_map",
+                "_score": 85,
+            })
+
+    # Sort by score then volume
+    results.sort(key=lambda r: (-r["_score"], -r.get("volume", 0)))
     for r in results:
-        del r["_score"]
-        del r["_volume"]
+        r.pop("_score", None)
 
     return results[:10]
 
