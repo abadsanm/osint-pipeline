@@ -326,7 +326,7 @@ export default function Header({ title }: HeaderProps) {
 
       {/* Page header */}
       <header className="flex items-center justify-between px-5 py-2.5 border-b border-border bg-surface">
-        <div className="flex items-center gap-4 flex-1 min-w-0">
+        <div className="flex items-center gap-3 min-w-0">
           <h1 className="text-base font-semibold tracking-tight flex-shrink-0">
             <span className="text-bullish">SENTINEL</span>
             <span className="text-neutral mx-1.5">|</span>
@@ -338,7 +338,7 @@ export default function Header({ title }: HeaderProps) {
             <span className="text-xs font-mono text-bullish ml-0.5" suppressHydrationWarning>{time}</span>
           </div>
 
-          {/* Watchlist ticker tape */}
+          {/* Watchlist ticker tape — hidden on small screens, capped width */}
           <WatchlistTicker />
         </div>
 
