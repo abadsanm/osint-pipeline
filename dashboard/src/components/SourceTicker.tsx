@@ -57,7 +57,7 @@ export default function SourceTicker() {
   );
 
   return (
-    <div className="relative overflow-hidden bg-base/80 border-b border-border/50">
+    <div className="hidden md:block relative overflow-hidden bg-base/80 border-b border-border/50">
       {/* Left: total badge with fade */}
       <div className="absolute left-0 top-0 bottom-0 z-10 flex items-center pl-3 pr-8 bg-gradient-to-r from-base via-base/95 to-transparent">
         <div className="flex items-center gap-1.5">

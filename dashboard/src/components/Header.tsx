@@ -158,13 +158,13 @@ export default function Header({ title }: HeaderProps) {
       {/* Top brand bar */}
       <div className="flex items-center justify-between px-5 py-2 bg-base border-b border-border">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-bullish/20 border border-bullish/30 flex items-center justify-center">
-            <span className="text-bullish font-bold text-sm">S</span>
+          <div className="w-6 h-6 md:w-7 md:h-7 rounded-lg bg-bullish/20 border border-bullish/30 flex items-center justify-center">
+            <span className="text-bullish font-bold text-xs md:text-sm">S</span>
           </div>
           <span className="text-sm font-semibold tracking-wide">
             <span className="text-bullish">SENTINEL</span>
-            <span className="text-neutral mx-1.5">|</span>
-            <span className="text-text-secondary">Social Alpha</span>
+            <span className="hidden md:inline text-neutral mx-1.5">|</span>
+            <span className="hidden md:inline text-text-secondary">Social Alpha</span>
           </span>
         </div>
         <div className="flex items-center gap-1">
@@ -193,7 +193,7 @@ export default function Header({ title }: HeaderProps) {
             </button>
 
             {showNotifications && (
-              <div className="absolute right-0 top-full mt-1 w-80 bg-surface-alt border border-border rounded-lg shadow-lg z-50 overflow-hidden">
+              <div className="absolute right-0 top-full mt-1 w-[calc(100vw-1rem)] md:w-80 max-w-[320px] md:max-w-none bg-surface-alt border border-border rounded-lg shadow-lg z-50 overflow-hidden">
                 <div className="flex items-center justify-between px-3 py-2 border-b border-border">
                   <span className="text-xs font-semibold text-text-secondary uppercase tracking-wide">
                     Recent Alerts
@@ -311,21 +311,79 @@ export default function Header({ title }: HeaderProps) {
 
         {/* Search with dropdown */}
         <div ref={searchRef} className="relative">
-          <Search
-            size={14}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted"
-          />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onFocus={() => { if (searchResults.length > 0) setShowSearch(true); }}
-            placeholder="Search Tickers, Topics..."
-            className="bg-surface-alt border border-border rounded-lg pl-8 pr-4 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-bullish/50 transition-colors w-60"
-          />
-
+          {/* Mobile: icon-only toggle */}
+          <button
+            onClick={() => setShowSearch((v) => !v)}
+            className="md:hidden p-2 text-text-muted hover:text-text-primary transition-colors"
+            title="Search"
+          >
+            <Search size={16} />
+          </button>
+          {/* Desktop: always-visible input */}
+          <div className="hidden md:block">
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted"
+            />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onFocus={() => { if (searchResults.length > 0) setShowSearch(true); }}
+              placeholder="Search Tickers, Topics..."
+              className="bg-surface-alt border border-border rounded-lg pl-8 pr-4 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-bullish/50 transition-colors w-60"
+            />
+          </div>
+          {/* Mobile: expandable search input + results */}
           {showSearch && (
-            <div className="absolute right-0 top-full mt-1 w-72 bg-surface-alt border border-border rounded-lg shadow-lg z-50 overflow-hidden">
+            <div className="absolute right-0 top-full mt-1 w-[calc(100vw-2rem)] md:hidden bg-surface-alt border border-border rounded-lg shadow-lg z-50 overflow-hidden">
+              <div className="relative p-2">
+                <Search size={14} className="absolute left-5 top-1/2 -translate-y-1/2 text-text-muted" />
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  autoFocus
+                  placeholder="Search Tickers, Topics..."
+                  className="bg-surface border border-border rounded-lg pl-8 pr-4 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-bullish/50 transition-colors w-full"
+                />
+              </div>
+              {(searchLoading || searchResults.length > 0) && (
+                <div className="border-t border-border/50 max-h-60 overflow-y-auto">
+                  {searchLoading && (
+                    <div className="px-3 py-2 text-xs text-text-muted">Searching...</div>
+                  )}
+                  {searchResults.map((r, i) => {
+                    const sl = sentimentLabel(r.sentiment);
+                    return (
+                      <button
+                        key={`${r.id}-${i}`}
+                        onClick={() => handleSearchSelect(r)}
+                        className="w-full flex items-center justify-between px-3 py-2 hover:bg-surface/50 transition-colors text-left border-b border-border/30 last:border-0"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-text-primary font-semibold truncate">{r.label}</p>
+                          <p className="text-[10px] text-text-muted truncate">{r.id}</p>
+                        </div>
+                        <div className="flex items-center gap-3 flex-shrink-0 ml-2">
+                          <span className="text-[10px] text-text-muted font-mono">
+                            Vol: {r.volume}
+                          </span>
+                          <span className={`text-[10px] font-semibold ${sl.cls}`}>
+                            {sl.text}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Desktop: search results dropdown */}
+          {showSearch && searchResults.length > 0 && (
+            <div className="hidden md:block absolute right-0 top-full mt-1 w-72 bg-surface-alt border border-border rounded-lg shadow-lg z-50 overflow-hidden">
               {searchLoading && (
                 <div className="px-3 py-2 text-xs text-text-muted">Searching...</div>
               )}
