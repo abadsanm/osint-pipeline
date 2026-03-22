@@ -836,6 +836,57 @@ def ml_predict(ticker: str):
         return {"ticker": ticker, "prediction": None, "reason": str(e)}
 
 
+@app.post("/api/ml/retrain-check")
+def ml_retrain_check():
+    """Check if model needs retraining (staleness + drift)."""
+    try:
+        from stock_alpha.ml_scorer import MLScorer
+        from stock_alpha.feature_store import FeatureStore
+
+        scorer = MLScorer()
+        store = FeatureStore()
+
+        stale = False
+        retrained = False
+        drift = {}
+
+        # Check staleness and retrain if needed
+        retrain_result = scorer.retrain_if_stale(store)
+        if retrain_result is not None:
+            stale = True
+            retrained = True
+
+        # Check drift
+        if scorer.is_trained:
+            drift = scorer.detect_drift(store)
+
+        return {
+            "stale": stale,
+            "drift": drift,
+            "retrained": retrained,
+            "model_trained": scorer.is_trained,
+        }
+    except Exception as e:
+        log.error("ML retrain-check failed: %s", e, exc_info=True)
+        return {"stale": False, "drift": {}, "retrained": False, "error": str(e)}
+
+
+@app.get("/api/ml/feature-importance")
+def ml_feature_importance():
+    """Get feature importance from the trained model."""
+    try:
+        from stock_alpha.ml_scorer import MLScorer
+
+        scorer = MLScorer()
+        if not scorer.is_trained:
+            return {"features": [], "reason": "Model not trained yet"}
+
+        importance = scorer.get_feature_importance()[:20]
+        return {"features": importance}
+    except Exception as e:
+        return {"features": [], "reason": str(e)}
+
+
 # ---------------------------------------------------------------------------
 # Settings Endpoints
 # ---------------------------------------------------------------------------
@@ -1440,6 +1491,32 @@ async def get_alpha(ticker: str):
     except Exception as e:
         log.debug("Macro regime failed: %s", e)
 
+    # --- ML Prediction data ---
+    ml_prediction = None
+    feature_importance = []
+    try:
+        from stock_alpha.ml_scorer import MLScorer
+        from stock_alpha.feature_store import FeatureStore
+
+        ml_scorer = MLScorer()
+        if ml_scorer.is_trained:
+            ml_store = FeatureStore()
+            ml_data = ml_store.get_training_data(ticker=ticker)
+            if ml_data:
+                latest_snapshot = ml_data[-1]
+                prediction = ml_scorer.predict(latest_snapshot)
+                if prediction:
+                    ml_prediction = {
+                        **prediction,
+                        "snapshot_time": latest_snapshot.get("timestamp"),
+                        "features_used": len(ml_scorer._feature_names),
+                        "training_stats": ml_scorer.training_stats,
+                    }
+            # Top 10 feature importances
+            feature_importance = ml_scorer.get_feature_importance()[:10]
+    except Exception as e:
+        log.debug("ML prediction failed for %s: %s", ticker, e)
+
     return {
         "ticker": ticker,
         "company": company,
@@ -1456,6 +1533,8 @@ async def get_alpha(ticker: str):
         "velocity": velocity_data,
         "insider": insider_data,
         "macro": macro_data,
+        "ml_prediction": ml_prediction,
+        "feature_importance": feature_importance,
     }
 
 

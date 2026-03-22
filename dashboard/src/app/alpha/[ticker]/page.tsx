@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Header from "@/components/Header";
 import SourceTicker from "@/components/SourceTicker";
 import AnalysisModal from "@/components/AnalysisModal";
-import { Brain, ArrowLeft, ExternalLink, AlertTriangle, Loader2 } from "lucide-react";
+import { Brain, ArrowLeft, ExternalLink, AlertTriangle, Loader2, Cpu, RefreshCw, CheckCircle, XCircle, Info } from "lucide-react";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -84,6 +84,34 @@ interface AlphaData {
     correlation_weight: number;
     components_available: string[];
   };
+  ml_prediction?: {
+    direction_1d?: string;
+    direction_5d?: string;
+    probability_up_1d?: number;
+    probability_down_1d?: number;
+    probability_flat_1d?: number;
+    probability_up_5d?: number;
+    probability_down_5d?: number;
+    probability_flat_5d?: number;
+    predicted_return_1d?: number;
+    confidence?: number;
+    ml_score?: number;
+    blended_score?: number;
+    snapshot_time?: string;
+    features_used?: number;
+    training_stats?: {
+      trained_at?: string;
+      samples?: number;
+      accuracy_1d?: number;
+      accuracy_5d?: number;
+      val_accuracy_1d?: number;
+      val_accuracy_5d?: number;
+    };
+  } | null;
+  feature_importance?: Array<{
+    feature: string;
+    importance: number;
+  }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -962,6 +990,335 @@ function VolumeAnalysis({
 }
 
 // ---------------------------------------------------------------------------
+// ML Prediction Panel
+// ---------------------------------------------------------------------------
+
+function MLPredictionPanel({ data }: { data: AlphaData }) {
+  const [retraining, setRetraining] = useState(false);
+  const [retrainResult, setRetrainResult] = useState<string | null>(null);
+
+  const ml = data.ml_prediction;
+  const features = data.feature_importance || [];
+  const isTrained = !!ml;
+
+  const handleRetrain = async () => {
+    setRetraining(true);
+    setRetrainResult(null);
+    try {
+      const res = await fetch(`${API_BASE}/ml/train`, { method: "POST" });
+      const json = await res.json();
+      if (json.status === "trained") {
+        setRetrainResult("Model retrained successfully");
+      } else if (json.status === "insufficient_data") {
+        setRetrainResult(json.message || "Insufficient data");
+      } else {
+        setRetrainResult(json.message || "Training failed");
+      }
+    } catch {
+      setRetrainResult("Network error during retrain");
+    }
+    setRetraining(false);
+  };
+
+  // Direction color helper
+  const dirColor = (dir?: string) => {
+    if (dir === "up") return "text-bullish";
+    if (dir === "down") return "text-bearish";
+    return "text-text-muted";
+  };
+
+  const dirBg = (dir?: string) => {
+    if (dir === "up") return "bg-bullish";
+    if (dir === "down") return "bg-bearish";
+    return "bg-neutral";
+  };
+
+  // Max importance for scaling bars
+  const maxImportance = features.length > 0 ? Math.max(...features.map((f) => f.importance)) : 1;
+
+  if (!isTrained) {
+    return (
+      <div className="bg-surface border border-border rounded-card p-card-padding-lg">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Cpu size={16} className="text-accent-blue" />
+            <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
+              ML Forecast
+            </h3>
+          </div>
+          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-neutral/20 text-text-muted border border-neutral/30">
+            Not Trained
+          </span>
+        </div>
+        <div className="flex flex-col items-center justify-center py-10 text-text-muted">
+          <Info size={24} className="mb-3 opacity-40" />
+          <p className="text-sm font-medium mb-1">Model not trained yet</p>
+          <p className="text-xs text-text-muted text-center max-w-md mb-4">
+            The ML model requires at least 50 labeled feature snapshots before training.
+            Keep the pipeline running to accumulate data, then trigger training.
+          </p>
+          <button
+            onClick={handleRetrain}
+            disabled={retraining}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-accent-blue/20 text-accent-blue border border-accent-blue/30 hover:bg-accent-blue/30 transition-colors disabled:opacity-50"
+          >
+            {retraining ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <RefreshCw size={12} />
+            )}
+            {retraining ? "Training..." : "Train Model"}
+          </button>
+          {retrainResult && (
+            <p className="text-[11px] text-text-muted mt-2">{retrainResult}</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const probUp1d = ml.probability_up_1d ?? 0;
+  const probDown1d = ml.probability_down_1d ?? 0;
+  const probFlat1d = ml.probability_flat_1d ?? 0;
+  const probUp5d = ml.probability_up_5d ?? 0;
+  const probDown5d = ml.probability_down_5d ?? 0;
+  const probFlat5d = ml.probability_flat_5d ?? 0;
+  const confidence = ml.confidence ?? 0;
+  const predictedReturn1d = ml.predicted_return_1d ?? 0;
+  const ruleScore = data.score?.overall ?? 0;
+  const mlScore = ml.ml_score ?? 0;
+  const blendedScore = ml.blended_score ?? ruleScore;
+  const stats = ml.training_stats;
+
+  return (
+    <div className="bg-surface border border-border rounded-card p-card-padding-lg">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-2">
+          <Cpu size={16} className="text-accent-blue" />
+          <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
+            ML Forecast
+          </h3>
+        </div>
+        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-bullish/20 text-bullish border border-bullish/30">
+          Trained
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* --- Direction Predictions --- */}
+        <div className="lg:col-span-1 space-y-4">
+          <h4 className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">
+            Direction Predictions
+          </h4>
+
+          {/* 1-Day */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs text-text-secondary">1-Day</span>
+              <span className={`font-mono text-xs font-semibold capitalize ${dirColor(ml.direction_1d)}`}>
+                {ml.direction_1d || "---"}
+              </span>
+            </div>
+            <div className="flex h-2.5 rounded-full overflow-hidden bg-surface-alt">
+              <div className="bg-bullish transition-all" style={{ width: `${probUp1d * 100}%` }} />
+              <div className="bg-neutral transition-all" style={{ width: `${probFlat1d * 100}%` }} />
+              <div className="bg-bearish transition-all" style={{ width: `${probDown1d * 100}%` }} />
+            </div>
+            <div className="flex justify-between mt-1 text-[10px] text-text-muted font-mono">
+              <span className="text-bullish">{(probUp1d * 100).toFixed(0)}%</span>
+              <span>{(probFlat1d * 100).toFixed(0)}%</span>
+              <span className="text-bearish">{(probDown1d * 100).toFixed(0)}%</span>
+            </div>
+            <div className="flex items-center justify-between mt-1.5">
+              <span className="text-[10px] text-text-muted">Predicted return</span>
+              <span className={`font-mono text-xs font-semibold ${predictedReturn1d >= 0 ? "text-bullish" : "text-bearish"}`}>
+                {predictedReturn1d >= 0 ? "+" : ""}{(predictedReturn1d * 100).toFixed(2)}%
+              </span>
+            </div>
+          </div>
+
+          {/* 5-Day */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs text-text-secondary">5-Day</span>
+              <span className={`font-mono text-xs font-semibold capitalize ${dirColor(ml.direction_5d)}`}>
+                {ml.direction_5d || "---"}
+              </span>
+            </div>
+            <div className="flex h-2.5 rounded-full overflow-hidden bg-surface-alt">
+              <div className="bg-bullish transition-all" style={{ width: `${probUp5d * 100}%` }} />
+              <div className="bg-neutral transition-all" style={{ width: `${probFlat5d * 100}%` }} />
+              <div className="bg-bearish transition-all" style={{ width: `${probDown5d * 100}%` }} />
+            </div>
+            <div className="flex justify-between mt-1 text-[10px] text-text-muted font-mono">
+              <span className="text-bullish">{(probUp5d * 100).toFixed(0)}%</span>
+              <span>{(probFlat5d * 100).toFixed(0)}%</span>
+              <span className="text-bearish">{(probDown5d * 100).toFixed(0)}%</span>
+            </div>
+          </div>
+
+          {/* Confidence */}
+          <div className="flex items-center justify-between pt-2 border-t border-border">
+            <span className="text-[11px] text-text-muted">Confidence</span>
+            <span className="font-mono text-sm font-semibold text-accent-blue">
+              {(confidence * 100).toFixed(0)}%
+            </span>
+          </div>
+        </div>
+
+        {/* --- Score Blend --- */}
+        <div className="lg:col-span-1 space-y-4">
+          <h4 className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">
+            Score Blend
+          </h4>
+          <div className="flex items-end gap-4 h-36">
+            {/* Rule-Based */}
+            <div className="flex-1 flex flex-col items-center">
+              <span className={`font-mono text-sm font-bold mb-1 ${ruleScore >= 0 ? "text-bullish" : "text-bearish"}`}>
+                {ruleScore >= 0 ? "+" : ""}{(ruleScore * 100).toFixed(0)}
+              </span>
+              <div className="w-full bg-surface-alt rounded-t-sm overflow-hidden relative" style={{ height: "100px" }}>
+                <div
+                  className={`absolute bottom-0 w-full rounded-t-sm transition-all ${ruleScore >= 0 ? "bg-bullish/60" : "bg-bearish/60"}`}
+                  style={{ height: `${Math.min(Math.abs(ruleScore) * 100, 100)}%` }}
+                />
+              </div>
+              <span className="text-[10px] text-text-muted mt-1.5">Rule</span>
+            </div>
+
+            {/* ML */}
+            <div className="flex-1 flex flex-col items-center">
+              <span className={`font-mono text-sm font-bold mb-1 ${mlScore >= 0 ? "text-bullish" : "text-bearish"}`}>
+                {mlScore >= 0 ? "+" : ""}{(mlScore * 100).toFixed(0)}
+              </span>
+              <div className="w-full bg-surface-alt rounded-t-sm overflow-hidden relative" style={{ height: "100px" }}>
+                <div
+                  className={`absolute bottom-0 w-full rounded-t-sm transition-all ${mlScore >= 0 ? "bg-accent-blue/60" : "bg-bearish/60"}`}
+                  style={{ height: `${Math.min(Math.abs(mlScore) * 100, 100)}%` }}
+                />
+              </div>
+              <span className="text-[10px] text-text-muted mt-1.5">ML</span>
+            </div>
+
+            {/* Blended */}
+            <div className="flex-1 flex flex-col items-center">
+              <span className={`font-mono text-sm font-bold mb-1 ${blendedScore >= 0 ? "text-bullish" : "text-bearish"}`}>
+                {blendedScore >= 0 ? "+" : ""}{(blendedScore * 100).toFixed(0)}
+              </span>
+              <div className="w-full bg-surface-alt rounded-t-sm overflow-hidden relative" style={{ height: "100px" }}>
+                <div
+                  className={`absolute bottom-0 w-full rounded-t-sm transition-all ${blendedScore >= 0 ? "bg-[#A78BFA]/60" : "bg-bearish/60"}`}
+                  style={{ height: `${Math.min(Math.abs(blendedScore) * 100, 100)}%` }}
+                />
+              </div>
+              <span className="text-[10px] text-text-muted mt-1.5">Blend</span>
+            </div>
+          </div>
+        </div>
+
+        {/* --- Feature Importance --- */}
+        <div className="lg:col-span-1 space-y-3">
+          <h4 className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">
+            Top Features
+          </h4>
+          {features.length === 0 ? (
+            <p className="text-xs text-text-muted py-4">No feature data</p>
+          ) : (
+            <div className="space-y-1.5">
+              {features.map((f, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span className="text-[10px] text-text-muted w-28 truncate font-mono" title={f.feature}>
+                    {f.feature}
+                  </span>
+                  <div className="flex-1 h-1.5 rounded-full bg-surface-alt overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-accent-blue/70 transition-all"
+                      style={{ width: `${(f.importance / maxImportance) * 100}%` }}
+                    />
+                  </div>
+                  <span className="font-mono text-[10px] text-text-secondary w-10 text-right">
+                    {(f.importance * 100).toFixed(1)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* --- Model Info Footer --- */}
+        <div className="lg:col-span-1 space-y-3">
+          <h4 className="text-[11px] text-text-muted uppercase tracking-wider font-semibold">
+            Model Info
+          </h4>
+          <div className="space-y-2 text-xs">
+            {stats?.trained_at && (
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Trained</span>
+                <span className="font-mono text-text-secondary">
+                  {new Date(stats.trained_at).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </div>
+            )}
+            {stats?.samples != null && (
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Samples</span>
+                <span className="font-mono text-text-secondary">{stats.samples.toLocaleString()}</span>
+              </div>
+            )}
+            {stats?.val_accuracy_1d != null && (
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Val Acc (1d)</span>
+                <span className="font-mono text-text-secondary">
+                  {(stats.val_accuracy_1d * 100).toFixed(1)}%
+                </span>
+              </div>
+            )}
+            {stats?.val_accuracy_5d != null && (
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Val Acc (5d)</span>
+                <span className="font-mono text-text-secondary">
+                  {(stats.val_accuracy_5d * 100).toFixed(1)}%
+                </span>
+              </div>
+            )}
+            {ml.features_used != null && (
+              <div className="flex items-center justify-between">
+                <span className="text-text-muted">Features</span>
+                <span className="font-mono text-text-secondary">{ml.features_used}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="pt-3 border-t border-border space-y-2">
+            <button
+              onClick={handleRetrain}
+              disabled={retraining}
+              className="flex items-center justify-center gap-1.5 w-full px-3 py-1.5 rounded-md text-xs font-medium bg-accent-blue/20 text-accent-blue border border-accent-blue/30 hover:bg-accent-blue/30 transition-colors disabled:opacity-50"
+            >
+              {retraining ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <RefreshCw size={12} />
+              )}
+              {retraining ? "Retraining..." : "Retrain Model"}
+            </button>
+            {retrainResult && (
+              <p className="text-[10px] text-text-muted text-center">{retrainResult}</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Loading skeleton
 // ---------------------------------------------------------------------------
 
@@ -1277,6 +1634,13 @@ export default function FinancialAlphaPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-module-gap-lg mb-module-gap-lg">
           <VolumeProfile candles={data.candles} />
           <VolumeAnalysis technicals_series={data.technicals_series} />
+        </div>
+
+        {/* ================================================================
+            4c. ML Prediction Panel
+            ================================================================ */}
+        <div className="mb-module-gap-lg">
+          <MLPredictionPanel data={data} />
         </div>
 
         {/* ================================================================
