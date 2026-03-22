@@ -459,6 +459,17 @@ export default function Header({ title }: HeaderProps) {
                   </button>
                 );
               })}
+              {/* Always show Google search option */}
+              {query.trim().length >= 2 && (
+                <a
+                  href={`https://www.google.com/search?q=${encodeURIComponent(query.trim())}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-1.5 px-3 py-2 text-[11px] text-accent-blue hover:bg-surface/50 transition-colors border-t border-border/30"
+                >
+                  Search &quot;{query.trim()}&quot; on Google →
+                </a>
+              )}
             </div>
           )}
         </div>

@@ -389,7 +389,7 @@ export default function InnovationPage() {
               </div>
             ) : (
               <div>
-                <ResponsiveContainer width="100%" height={data.criticisms.length * 48 + 20}>
+                <ResponsiveContainer width="100%" height={data.criticisms.length * 28 + 20}>
                   <BarChart
                     data={data.criticisms}
                     layout="vertical"
@@ -416,7 +416,13 @@ export default function InnovationPage() {
                       width={85}
                     />
                     <Tooltip contentStyle={tooltipStyle} />
-                    <Bar dataKey="volume" fill="#FF4B2B" radius={[0, 3, 3, 0]} barSize={14} opacity={0.85} />
+                    <Bar
+                      dataKey="volume" fill="#FF4B2B" radius={[0, 3, 3, 0]} barSize={10} opacity={0.85}
+                      className="cursor-pointer"
+                      onClick={(entry: any) => {
+                        if (entry?.feature) setAnalysisTarget({ id: entry.feature, label: entry.feature, sentiment: 1 - (entry.intensity || 0.5), volume: entry.volume || 0 });
+                      }}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
                 {/* Sample quotes */}
@@ -465,7 +471,7 @@ export default function InnovationPage() {
               </div>
             ) : (
               <div>
-                <ResponsiveContainer width="100%" height={data.requests.length * 48 + 20}>
+                <ResponsiveContainer width="100%" height={data.requests.length * 28 + 20}>
                   <BarChart
                     data={data.requests}
                     layout="vertical"
@@ -492,7 +498,13 @@ export default function InnovationPage() {
                       width={95}
                     />
                     <Tooltip contentStyle={tooltipStyle} />
-                    <Bar dataKey="volume" fill="#00FFC2" radius={[0, 4, 4, 0]} barSize={14} opacity={0.85} />
+                    <Bar
+                      dataKey="volume" fill="#00FFC2" radius={[0, 3, 3, 0]} barSize={10} opacity={0.85}
+                      className="cursor-pointer"
+                      onClick={(entry: any) => {
+                        if (entry?.feature) setAnalysisTarget({ id: entry.feature, label: entry.feature, sentiment: 0.5, volume: entry.volume || 0 });
+                      }}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
                 {/* Sample quotes */}
