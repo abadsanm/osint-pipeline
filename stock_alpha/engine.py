@@ -11,12 +11,15 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from collections import defaultdict, deque
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from stock_alpha.config import StockAlphaConfig
 from stock_alpha.scorer import AlphaSignal, RuleBasedScorer
+from stock_alpha.regime import classify_regime, MarketRegime
+from schemas.prediction import Prediction, PredictionBatch
 from stock_alpha.sentiment import FinBERTAnalyzer, SentimentResult, aggregate_sentiment
 from stock_alpha.svc import SVCComputer, SentimentDataPoint
 from stock_alpha.technicals import PriceDataProvider, compute_technicals
@@ -64,6 +67,9 @@ class StockAlphaEngine:
         from stock_alpha.ml_scorer import MLScorer
         self._feature_store = FeatureStore()
         self._ml_scorer = MLScorer()
+
+        # Prediction publisher (set externally if Kafka is available)
+        self._prediction_publisher = None
 
     def setup(self):
         """Load models."""
@@ -175,7 +181,67 @@ class StockAlphaEngine:
             except Exception as e:
                 log.debug("ML blending failed for %s: %s", ticker, e)
 
+        # 10. Generate predictions at multiple time horizons
+        try:
+            regime = classify_regime(technicals)
+            batch = self._generate_predictions(ticker, alpha, regime)
+            if self._prediction_publisher:
+                self._prediction_publisher.publish(
+                    "stock.alpha.predictions",
+                    batch.to_kafka_key(),
+                    batch.to_kafka_value(),
+                )
+        except Exception as e:
+            log.debug("Prediction generation failed for %s: %s", ticker, e)
+
         return alpha
+
+    # ------------------------------------------------------------------
+    # Prediction generation
+    # ------------------------------------------------------------------
+
+    def _generate_predictions(
+        self, ticker: str, alpha: AlphaSignal, regime: MarketRegime
+    ) -> PredictionBatch:
+        """Generate predictions at 5 time horizons from an alpha signal."""
+        horizons = [1, 4, 24, 72, 168]  # hours
+
+        # Decay rates by signal composition
+        # Fast decay for social sentiment, slow for fundamentals
+        base_decay = 24.0  # default half-life in hours
+
+        predictions = []
+        for h in horizons:
+            # Scale magnitude by horizon (longer horizon = larger expected move)
+            horizon_scale = math.sqrt(h / 24)  # square root of time scaling
+            magnitude = abs(alpha.signal_score) * horizon_scale * 2  # rough % estimate
+
+            # Confidence decays for longer horizons
+            horizon_confidence = alpha.confidence * math.exp(-0.1 * (h / 24))
+
+            pred = Prediction(
+                ticker=ticker,
+                direction=alpha.signal_direction,
+                magnitude=round(magnitude, 4),
+                confidence=round(min(1.0, max(0.0, horizon_confidence)), 4),
+                raw_score=alpha.signal_score,
+                time_horizon_hours=h,
+                decay_rate=base_decay,
+                regime=regime.regime,
+                contributing_signals=[],  # Could be enriched later
+                model_version="v1.0",
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=h),
+            )
+            predictions.append(pred)
+
+        return PredictionBatch(
+            ticker=ticker,
+            predictions=predictions,
+        )
+
+    def set_prediction_publisher(self, publisher):
+        """Set the Kafka publisher for prediction output."""
+        self._prediction_publisher = publisher
 
     # ------------------------------------------------------------------
     # Market data ingestion (called from __main__ when consuming market topics)

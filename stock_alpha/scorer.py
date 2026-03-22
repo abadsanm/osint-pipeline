@@ -14,8 +14,10 @@ Two modes:
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 import pandas as pd
@@ -24,6 +26,9 @@ from stock_alpha.config import StockAlphaConfig
 from stock_alpha.svc import SVCResult
 
 log = logging.getLogger("stock_alpha.scorer")
+
+# Directory where trained models are stored
+_MODELS_DIR = Path(__file__).parent / "models"
 
 
 @dataclass
@@ -103,7 +108,16 @@ class RuleBasedScorer:
         "correlation": 0.10,
     }
 
-    def score(
+    # Cached ML models (class-level so they persist across calls)
+    _xgb_model = None
+    _calibrator = None
+    _models_loaded = False
+
+    def score(self, *args, **kwargs) -> AlphaSignal:
+        """Backward-compatible wrapper."""
+        return self.score_rule_based(*args, **kwargs)
+
+    def score_rule_based(
         self,
         ticker: str,
         sentiment_score: float,
@@ -190,6 +204,171 @@ class RuleBasedScorer:
             microstructure_score=micro_score,
             order_flow_score=flow_score,
         )
+
+    def _load_models(self):
+        """Load XGBoost and calibrator models from disk (once)."""
+        if RuleBasedScorer._models_loaded:
+            return
+        RuleBasedScorer._models_loaded = True
+
+        xgb_path = _MODELS_DIR / "scorer_latest.joblib"
+        cal_path = _MODELS_DIR / "calibrator_latest.joblib"
+
+        try:
+            import joblib
+
+            if xgb_path.exists():
+                RuleBasedScorer._xgb_model = joblib.load(xgb_path)
+                log.info("Loaded XGBoost scorer model from %s", xgb_path)
+            else:
+                log.debug("No XGBoost model found at %s — using rule-based fallback", xgb_path)
+
+            if cal_path.exists():
+                RuleBasedScorer._calibrator = joblib.load(cal_path)
+                log.info("Loaded calibrator model from %s", cal_path)
+            else:
+                log.debug("No calibrator model found at %s", cal_path)
+        except Exception as exc:
+            log.warning("Failed to load ML models: %s", exc)
+
+    def score_ensemble(
+        self,
+        ticker: str,
+        sentiment_score: float,
+        svc: Optional[SVCResult],
+        technicals: Optional[pd.DataFrame],
+        correlation_confidence: float,
+        contributing_signals: int = 0,
+        top_sources: Optional[list[str]] = None,
+        microstructure_signals: Optional[dict] = None,
+        order_flow_signals: Optional[dict] = None,
+    ) -> tuple[AlphaSignal, dict]:
+        """Score using an XGBoost ensemble if available, else fall back to rules.
+
+        Returns a tuple of (AlphaSignal, feature_vector_dict).
+        """
+        # Normalize SVC
+        svc_value = svc.svc_value if svc else 0.0
+        svc_normalized = max(-1.0, min(1.0, svc_value * 10))
+
+        # Technical scores
+        tech_score, rsi, macd_hist, bb_pctb, price = self._score_technicals(technicals)
+
+        # SMA20 distance
+        sma20_distance = 0.0
+        if technicals is not None and not technicals.empty:
+            latest = technicals.iloc[-1]
+            sma_20 = latest.get("sma_20")
+            px = latest.get("close")
+            if sma_20 is not None and px is not None and not pd.isna(sma_20) and sma_20 != 0:
+                sma20_distance = (px - sma_20) / sma_20
+
+        # Microstructure & order flow scores
+        micro_score = self._score_microstructure(microstructure_signals)
+        flow_score = self._score_order_flow(order_flow_signals)
+
+        # Build feature vector
+        feature_vector: dict = {
+            "sentiment_score": sentiment_score,
+            "svc_normalized": svc_normalized,
+            "tech_score": tech_score,
+            "rsi": rsi if rsi is not None and not pd.isna(rsi) else 0.0,
+            "macd_hist": macd_hist if macd_hist is not None and not pd.isna(macd_hist) else 0.0,
+            "bb_pctb": bb_pctb if bb_pctb is not None and not pd.isna(bb_pctb) else 0.0,
+            "sma20_distance": sma20_distance,
+            "obv_slope": 0.0,  # Not directly available; placeholder
+            "correlation_confidence": correlation_confidence,
+            "microstructure_score": micro_score if micro_score is not None else 0.0,
+            "order_flow_score": flow_score if flow_score is not None else 0.0,
+        }
+
+        # Attempt to load ML models
+        self._load_models()
+
+        if RuleBasedScorer._xgb_model is not None:
+            try:
+                import numpy as np
+
+                # Build ordered feature array matching training column order
+                feature_names = [
+                    "sentiment_score", "svc_normalized", "tech_score",
+                    "rsi", "macd_hist", "bb_pctb", "sma20_distance",
+                    "obv_slope", "correlation_confidence",
+                    "microstructure_score", "order_flow_score",
+                ]
+                X = np.array([[feature_vector[f] for f in feature_names]])
+
+                model = RuleBasedScorer._xgb_model
+                prediction = model.predict(X)[0]  # class label
+                probabilities = model.predict_proba(X)[0]
+                max_prob = float(probabilities.max())
+
+                # Map predicted class to signal score
+                # Convention: 0 = bearish, 1 = neutral, 2 = bullish
+                classes = list(model.classes_)
+                if prediction == 2 or (isinstance(prediction, str) and prediction == "bullish"):
+                    signal_score = max_prob
+                elif prediction == 0 or (isinstance(prediction, str) and prediction == "bearish"):
+                    signal_score = -max_prob
+                else:
+                    signal_score = 0.0
+
+                confidence = max_prob
+
+                # Apply calibration if available
+                if RuleBasedScorer._calibrator is not None:
+                    try:
+                        cal_probs = RuleBasedScorer._calibrator.predict_proba(X)[0]
+                        confidence = float(cal_probs.max())
+                    except Exception:
+                        pass  # Keep uncalibrated confidence
+
+                signal_score = max(-1.0, min(1.0, signal_score))
+
+                if signal_score > 0.15:
+                    direction = "bullish"
+                elif signal_score < -0.15:
+                    direction = "bearish"
+                else:
+                    direction = "neutral"
+
+                alpha = AlphaSignal(
+                    ticker=ticker,
+                    signal_score=signal_score,
+                    signal_direction=direction,
+                    confidence=min(1.0, confidence),
+                    sentiment_score=sentiment_score,
+                    svc_value=svc_value,
+                    technical_score=tech_score,
+                    correlation_confidence=correlation_confidence,
+                    contributing_signals=contributing_signals,
+                    top_sources=top_sources or [],
+                    timestamp=datetime.now(timezone.utc),
+                    rsi=rsi,
+                    macd_hist=macd_hist,
+                    bb_pctb=bb_pctb,
+                    price=price,
+                    microstructure_score=micro_score,
+                    order_flow_score=flow_score,
+                )
+                return alpha, feature_vector
+
+            except Exception as exc:
+                log.warning("XGBoost prediction failed, falling back to rule-based: %s", exc)
+
+        # Fallback to rule-based scoring
+        alpha = self.score_rule_based(
+            ticker=ticker,
+            sentiment_score=sentiment_score,
+            svc=svc,
+            technicals=technicals,
+            correlation_confidence=correlation_confidence,
+            contributing_signals=contributing_signals,
+            top_sources=top_sources,
+            microstructure_signals=microstructure_signals,
+            order_flow_signals=order_flow_signals,
+        )
+        return alpha, feature_vector
 
     @classmethod
     def _redistribute_weights(cls, active_keys: set[str]) -> dict[str, float]:

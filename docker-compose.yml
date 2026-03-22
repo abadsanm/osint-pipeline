@@ -190,6 +190,14 @@ services:
         --topic market.alpaca.bars --partitions 3 --replication-factor 1 \
         --config retention.ms=604800000
 
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic stock.alpha.predictions --partitions 6 --replication-factor 1 \
+        --config retention.ms=2592000000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic stock.alpha.outcomes --partitions 3 --replication-factor 1 \
+        --config retention.ms=2592000000
+
       echo 'All topics created.'
       kafka-topics --bootstrap-server kafka:29092 --list
       "
