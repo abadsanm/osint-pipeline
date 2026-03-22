@@ -18,7 +18,8 @@ import {
   Label,
   Cell,
 } from "recharts";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Brain, TrendingUp, TrendingDown, Minus, ArrowRight } from "lucide-react";
+import AnalysisModal from "@/components/AnalysisModal";
 
 /* ─── Types ─── */
 
@@ -28,6 +29,7 @@ interface FeatureItem {
   intensity: number;
   sources: string[];
   sample_quote: string;
+  trend?: "worsening" | "improving" | "stable";
 }
 
 interface GapPoint {
@@ -36,6 +38,7 @@ interface GapPoint {
   importance: number;
   volume: number;
   entity_id: string;
+  opportunity_score?: number;
 }
 
 interface TrendingTopic {
@@ -51,6 +54,12 @@ interface RecentInsight {
   created_at: string;
 }
 
+interface CompetitiveLandscapeEntry {
+  entity: string;
+  competitors: string[];
+  shared_mentions: number;
+}
+
 interface InnovationData {
   channels: Record<string, number>;
   criticisms: FeatureItem[];
@@ -63,6 +72,7 @@ interface InnovationData {
     total_mentions: number;
     avg_sentiment: number;
   };
+  competitive_landscape?: CompetitiveLandscapeEntry[];
 }
 
 /* ─── Source color mapping ─── */
@@ -187,6 +197,11 @@ function GapMapTooltip({ active, payload }: any) {
       <p className="text-[11px] text-text-secondary">
         Volume: <span className="font-mono text-accent-blue">{d.volume.toLocaleString()}</span>
       </p>
+      {d.opportunity_score != null && (
+        <p className="text-[11px] text-text-secondary">
+          Opportunity: <span className="font-mono text-bullish">{(d.opportunity_score * 100).toFixed(0)}</span>
+        </p>
+      )}
     </div>
   );
 }
@@ -212,12 +227,38 @@ function renderScatterLabel(props: any) {
   );
 }
 
+/* ─── Trend Indicator ─── */
+
+function TrendIndicator({ trend }: { trend?: string }) {
+  if (!trend) return null;
+  if (trend === "worsening")
+    return <TrendingUp size={12} className="text-bearish inline-block ml-1" title="Worsening" />;
+  if (trend === "improving")
+    return <TrendingDown size={12} className="text-bullish inline-block ml-1" title="Improving" />;
+  return <Minus size={12} className="text-text-muted inline-block ml-1" title="Stable" />;
+}
+
+/* ─── Opportunity Score Badge ─── */
+
+function OpportunityBadge({ score }: { score: number }) {
+  const color =
+    score >= 0.6 ? "bg-bullish/20 text-bullish border-bullish/30" :
+    score >= 0.3 ? "bg-accent-blue/20 text-accent-blue border-accent-blue/30" :
+    "bg-text-muted/20 text-text-muted border-text-muted/30";
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-medium border ${color}`}>
+      {(score * 100).toFixed(0)}
+    </span>
+  );
+}
+
 /* ─── Main Page ─── */
 
 export default function InnovationPage() {
   const [activeChannel, setActiveChannel] = useState<string>("all");
   const [data, setData] = useState<InnovationData>(EMPTY_DATA);
   const [loading, setLoading] = useState(true);
+  const [analysisTarget, setAnalysisTarget] = useState<{id: string; label: string; sentiment: number; volume: number} | null>(null);
 
   const fetchData = useCallback(async (channel: string) => {
     try {
@@ -257,6 +298,13 @@ export default function InnovationPage() {
   );
 
   const recentItems = data.recent_insights.slice(0, 10);
+
+  const topOpportunities = useMemo(() => {
+    return [...data.gap_map]
+      .filter((g) => g.opportunity_score != null)
+      .sort((a, b) => (b.opportunity_score ?? 0) - (a.opportunity_score ?? 0))
+      .slice(0, 5);
+  }, [data.gap_map]);
 
   return (
     <div className="flex flex-col h-screen bg-base">
@@ -370,10 +418,21 @@ export default function InnovationPage() {
                   {data.criticisms.map(
                     (c) =>
                       c.sample_quote && (
-                        <p key={c.feature} className="text-[11px] text-text-muted truncate pl-1 border-l-2 border-bearish/30">
-                          <span className="font-medium text-text-secondary">{c.feature}:</span>{" "}
-                          &ldquo;{c.sample_quote.slice(0, 120)}{c.sample_quote.length > 120 ? "..." : ""}&rdquo;
-                        </p>
+                        <div key={c.feature} className="flex items-center gap-1 text-[11px] text-text-muted pl-1 border-l-2 border-bearish/30">
+                          <p className="truncate flex-1">
+                            <span className="font-medium text-text-secondary">{c.feature}</span>
+                            <TrendIndicator trend={c.trend} />
+                            :{" "}
+                            &ldquo;{c.sample_quote.slice(0, 120)}{c.sample_quote.length > 120 ? "..." : ""}&rdquo;
+                          </p>
+                          <button
+                            onClick={() => setAnalysisTarget({ id: c.feature, label: c.feature, sentiment: 1 - c.intensity, volume: c.volume })}
+                            className="flex-shrink-0 p-0.5 rounded hover:bg-surface-alt text-text-muted hover:text-accent-blue transition-colors"
+                            title="Analyze with Sentinel AI"
+                          >
+                            <Brain size={12} />
+                          </button>
+                        </div>
                       ),
                   )}
                 </div>
@@ -430,10 +489,21 @@ export default function InnovationPage() {
                   {data.requests.map(
                     (r) =>
                       r.sample_quote && (
-                        <p key={r.feature} className="text-[11px] text-text-muted truncate pl-1 border-l-2 border-bullish/30">
-                          <span className="font-medium text-text-secondary">{r.feature}:</span>{" "}
-                          &ldquo;{r.sample_quote.slice(0, 120)}{r.sample_quote.length > 120 ? "..." : ""}&rdquo;
-                        </p>
+                        <div key={r.feature} className="flex items-center gap-1 text-[11px] text-text-muted pl-1 border-l-2 border-bullish/30">
+                          <p className="truncate flex-1">
+                            <span className="font-medium text-text-secondary">{r.feature}</span>
+                            <TrendIndicator trend={r.trend} />
+                            :{" "}
+                            &ldquo;{r.sample_quote.slice(0, 120)}{r.sample_quote.length > 120 ? "..." : ""}&rdquo;
+                          </p>
+                          <button
+                            onClick={() => setAnalysisTarget({ id: r.feature, label: r.feature, sentiment: 0.5, volume: r.volume })}
+                            className="flex-shrink-0 p-0.5 rounded hover:bg-surface-alt text-text-muted hover:text-accent-blue transition-colors"
+                            title="Analyze with Sentinel AI"
+                          >
+                            <Brain size={12} />
+                          </button>
+                        </div>
                       ),
                   )}
                 </div>
@@ -544,7 +614,67 @@ export default function InnovationPage() {
               </ScatterChart>
             </ResponsiveContainer>
           )}
+
+          {/* Top Opportunities ranked list */}
+          {topOpportunities.length > 0 && (
+            <div className="mt-5 border-t border-border pt-4">
+              <h4 className="text-xs font-semibold text-text-secondary mb-3">Top Opportunities</h4>
+              <div className="space-y-2">
+                {topOpportunities.map((g, idx) => (
+                  <div
+                    key={g.entity_id}
+                    className="flex items-center gap-3 px-3 py-2 rounded-md bg-surface-alt/40 hover:bg-surface-alt transition-colors"
+                  >
+                    <span className="text-[10px] font-mono text-text-muted w-4">{idx + 1}.</span>
+                    <span className="text-xs font-medium text-text-primary flex-1 truncate">{g.feature}</span>
+                    <OpportunityBadge score={g.opportunity_score ?? 0} />
+                    <span className="text-[10px] text-text-muted font-mono">
+                      Sat {(g.satisfaction * 100).toFixed(0)}%
+                    </span>
+                    <span className="text-[10px] text-text-muted font-mono">
+                      Imp {(g.importance * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
+
+        {/* ── Competitive Landscape ── */}
+        {data.competitive_landscape && data.competitive_landscape.length > 0 && (
+          <div className="bg-surface border border-border rounded-card p-card-padding-lg">
+            <h3 className="text-sm font-semibold text-text-secondary mb-4">
+              Competitive Landscape
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {data.competitive_landscape.map((entry) => (
+                <div
+                  key={entry.entity}
+                  className="flex items-center gap-2 px-3 py-2.5 rounded-md bg-surface-alt/50 border border-border/50"
+                >
+                  <span className="text-xs font-semibold text-text-primary whitespace-nowrap">
+                    {entry.entity}
+                  </span>
+                  <ArrowRight size={12} className="text-text-muted flex-shrink-0" />
+                  <div className="flex flex-wrap gap-1 flex-1">
+                    {entry.competitors.map((comp) => (
+                      <span
+                        key={comp}
+                        className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-accent-blue/10 text-accent-blue border border-accent-blue/20"
+                      >
+                        {comp}
+                      </span>
+                    ))}
+                  </div>
+                  <span className="text-[10px] font-mono text-text-muted flex-shrink-0" title="Shared mentions">
+                    {entry.shared_mentions}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ── Trending Topics ── */}
         {data.trending_topics.length > 0 && (
@@ -645,6 +775,15 @@ export default function InnovationPage() {
         {/* Bottom spacer */}
         <div className="h-4" />
       </div>
+
+      {/* ── Analysis Modal ── */}
+      {analysisTarget && (
+        <AnalysisModal
+          entity={analysisTarget}
+          contextType="entity"
+          onClose={() => setAnalysisTarget(null)}
+        />
+      )}
     </div>
   );
 }

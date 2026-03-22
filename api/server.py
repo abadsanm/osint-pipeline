@@ -1622,6 +1622,106 @@ def get_innovation(
         sent_cnt = sum(em.get("sentiment_count", 0) for em in filtered_entities)
         avg_sentiment = round(sent_sum / sent_cnt, 3) if sent_cnt > 0 else 0.5
 
+        # ----- opportunity_scores: add score to each gap_map entry -----
+        for gap in gap_map:
+            vol = gap["volume"]
+            log_vol = math.log(max(vol, 1)) if vol > 0 else 0.0
+            gap["opportunity_score"] = round(
+                (1.0 - gap["satisfaction"]) * gap["importance"] * min(1.0, log_vol / 5.0), 3
+            )
+
+        # ----- sentiment_trends: add trend to criticisms and requests -----
+        # Build entity_id lookup from filtered_entities
+        _entity_by_label: dict[str, dict] = {}
+        for em in filtered_entities:
+            _entity_by_label[em.get("label", em["id"])] = em
+
+        def _compute_trend(feature_label: str) -> str:
+            """Compare first-half vs second-half sentiment of sample_docs."""
+            em = _entity_by_label.get(feature_label)
+            if not em:
+                return "stable"
+            docs = em.get("sample_docs", [])
+            if len(docs) < 2:
+                return "stable"
+            # Sort by created_at ascending
+            sorted_docs = sorted(docs, key=lambda d: d.get("created_at") or d.get("ingested_at") or "")
+            mid = len(sorted_docs) // 2
+            first_half = sorted_docs[:mid]
+            second_half = sorted_docs[mid:]
+
+            def _avg_sentiment_approx(doc_list: list) -> float:
+                """Approximate sentiment from content: negative words → lower score."""
+                _neg = {"bad", "worst", "terrible", "horrible", "awful", "hate", "slow",
+                        "bug", "crash", "broken", "fail", "disappointing", "poor", "useless"}
+                _pos = {"good", "great", "love", "fast", "excellent", "awesome", "perfect",
+                        "amazing", "best", "reliable", "helpful", "easy"}
+                total_score = 0.0
+                count = 0
+                for d in doc_list:
+                    text = ((d.get("content") or "") + " " + (d.get("title") or "")).lower()
+                    words = set(text.split())
+                    neg_count = len(words & _neg)
+                    pos_count = len(words & _pos)
+                    total = neg_count + pos_count
+                    if total > 0:
+                        total_score += pos_count / total
+                        count += 1
+                return total_score / count if count > 0 else 0.5
+
+            sent_first = _avg_sentiment_approx(first_half)
+            sent_second = _avg_sentiment_approx(second_half)
+            diff = sent_second - sent_first
+            if diff < -0.1:
+                return "worsening"
+            elif diff > 0.1:
+                return "improving"
+            return "stable"
+
+        for item in criticisms:
+            item["trend"] = _compute_trend(item["feature"])
+        for item in requests_list:
+            item["trend"] = _compute_trend(item["feature"])
+
+        # ----- competitive_landscape: co-occurring entities -----
+        competitive_landscape: list[dict] = []
+        # Build a mapping of entity -> set of doc titles for co-occurrence
+        entity_doc_titles: dict[str, set[str]] = {}
+        top_entities = sorted(filtered_entities, key=lambda e: e.get("volume", 0), reverse=True)[:10]
+        top_entity_ids = {em["id"] for em in top_entities}
+        top_entity_labels = {em["id"]: em.get("label", em["id"]) for em in top_entities}
+
+        # Collect doc title sets for each top entity
+        for em in top_entities:
+            titles = set()
+            for doc in em.get("sample_docs", []):
+                t = (doc.get("title") or "") + " " + (doc.get("content") or "")
+                if t.strip():
+                    titles.add(t.strip()[:200])
+            entity_doc_titles[em["id"]] = titles
+
+        # Find competitors by checking if other top entities' labels appear in docs
+        for em in top_entities:
+            docs_text = " ".join(entity_doc_titles.get(em["id"], [])).lower()
+            if not docs_text:
+                continue
+            competitors: list[str] = []
+            shared_count = 0
+            for other in top_entities:
+                if other["id"] == em["id"]:
+                    continue
+                other_label = other.get("label", other["id"]).lower()
+                # Check if the other entity's label appears in this entity's docs
+                if other_label and len(other_label) > 1 and other_label in docs_text:
+                    competitors.append(top_entity_labels[other["id"]])
+                    shared_count += 1
+            if competitors:
+                competitive_landscape.append({
+                    "entity": top_entity_labels[em["id"]],
+                    "competitors": competitors,
+                    "shared_mentions": shared_count,
+                })
+
     return {
         "channels": channels,
         "criticisms": criticisms,
@@ -1634,6 +1734,7 @@ def get_innovation(
             "total_mentions": total_mentions,
             "avg_sentiment": avg_sentiment,
         },
+        "competitive_landscape": competitive_landscape,
     }
 
 
