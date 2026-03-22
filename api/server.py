@@ -836,6 +836,73 @@ async def get_alpha(ticker: str):
     except Exception as e:
         log.warning("Score computation failed for %s: %s", ticker, e)
 
+    # --- Phase 2: Sentiment velocity, insider scoring, macro regime ---
+    velocity_data = None
+    try:
+        from stock_alpha.sentiment_velocity import SentimentVelocityTracker
+        # Build velocity from sentiment timeline if available
+        if sentiment_data.get("timeline"):
+            tracker = SentimentVelocityTracker()
+            for pt in sentiment_data["timeline"]:
+                from datetime import datetime as _dt
+                try:
+                    ts = _dt.fromisoformat(pt["date"]) if "T" in pt.get("date", "") else _dt.strptime(pt["date"], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                    tracker.add_observation(ticker, ts, pt.get("avg_sentiment", 0.5) * 2 - 1, pt.get("count", 1))
+                except Exception:
+                    pass
+            vel = tracker.compute(ticker)
+            if vel:
+                velocity_data = {
+                    "velocity": round(vel.velocity, 4),
+                    "acceleration": round(vel.acceleration, 4),
+                    "momentum_score": round(vel.momentum_score, 4),
+                    "regime": vel.regime,
+                    "window_hours": round(vel.window_hours, 1),
+                    "data_points": vel.data_points,
+                }
+    except Exception as e:
+        log.debug("Velocity computation failed for %s: %s", ticker, e)
+
+    insider_data = None
+    try:
+        from stock_alpha.insider_scoring import InsiderScorer
+        scorer = InsiderScorer()
+        # Ingest any insider trades from entity_mentions sample_docs
+        # (This is a lightweight check — full scoring requires the engine)
+        with _lock:
+            for s in signals:
+                if s.get("ticker", "").upper() == ticker and "insider" in s.get("headline", "").lower():
+                    insider_data = {
+                        "score": 0.0,
+                        "regime": "neutral",
+                        "headline": s.get("headline", ""),
+                        "detected": True,
+                    }
+                    break
+    except Exception as e:
+        log.debug("Insider scoring failed for %s: %s", ticker, e)
+
+    macro_data = None
+    try:
+        from stock_alpha.macro_regime import MacroRegimeDetector
+        detector = MacroRegimeDetector()
+        # Feed FRED data from Kafka cache
+        with _lock:
+            fred_docs = [d for d in recent_docs.get("finance.macro.fred", []) if isinstance(d, dict)]
+        for doc in fred_docs:
+            detector.ingest(doc)
+        regime = detector.classify()
+        if regime:
+            macro_data = {
+                "regime": regime.regime,
+                "confidence": round(regime.confidence, 2),
+                "regime_score": round(regime.regime_score, 2),
+                "description": regime.description,
+                "indicators": regime.indicators,
+            }
+    except Exception as e:
+        log.debug("Macro regime failed: %s", e)
+
     return {
         "ticker": ticker,
         "company": company,
@@ -849,6 +916,9 @@ async def get_alpha(ticker: str):
         "sentiment": sentiment_data,
         "signal": signal_data,
         "score": score_data,
+        "velocity": velocity_data,
+        "insider": insider_data,
+        "macro": macro_data,
     }
 
 

@@ -26,6 +26,9 @@ from stock_alpha.microstructure import (
     detect_fair_value_gaps,
 )
 from stock_alpha.order_flow import compute_order_flow_delta, detect_liquidity_sweeps
+from stock_alpha.sentiment_velocity import SentimentVelocityTracker
+from stock_alpha.insider_scoring import InsiderScorer
+from stock_alpha.macro_regime import MacroRegimeDetector
 from schemas.signal import CorrelatedSignal
 from schemas.market_data import MarketBar, AggregatedTrade, OrderBookSnapshot
 
@@ -50,6 +53,11 @@ class StockAlphaEngine:
         self._bars: dict[str, deque[MarketBar]] = defaultdict(lambda: deque(maxlen=_MAX_BARS))
         self._trades: dict[str, deque[AggregatedTrade]] = defaultdict(lambda: deque(maxlen=_MAX_TRADES))
         self._depth: dict[str, deque[OrderBookSnapshot]] = defaultdict(lambda: deque(maxlen=_MAX_DEPTH))
+
+        # Phase 2 modules
+        self._velocity = SentimentVelocityTracker()
+        self._insider = InsiderScorer()
+        self._macro = MacroRegimeDetector()
 
     def setup(self):
         """Load models."""
@@ -82,11 +90,37 @@ class StockAlphaEngine:
         # 3. Fetch price data and compute technicals
         technicals = self._get_technicals(ticker)
 
-        # 4. Compute microstructure & order flow from cached market data
+        # 4. Update sentiment velocity tracker
+        self._velocity.add_observation(
+            ticker, datetime.now(timezone.utc), sentiment_score, signal.total_mentions
+        )
+
+        # 5. Compute microstructure & order flow from cached market data
         micro_signals = self._compute_microstructure(ticker)
         flow_signals = self._compute_order_flow(ticker)
 
-        # 5. Score the signal
+        # 6. Enrich with Phase 2 signals
+        velocity = self._velocity.compute(ticker)
+        if velocity and micro_signals is None:
+            # Use velocity as a microstructure-tier signal when no market data
+            micro_signals = {"sentiment_velocity": velocity.momentum_score}
+        elif velocity and micro_signals is not None:
+            micro_signals["sentiment_velocity"] = velocity.momentum_score
+
+        insider = self._insider.compute(ticker)
+        if insider and flow_signals is None:
+            flow_signals = {"insider_score": insider.score}
+        elif insider and flow_signals is not None:
+            flow_signals["insider_score"] = insider.score
+
+        macro = self._macro.classify()
+        if macro:
+            if flow_signals is None:
+                flow_signals = {"macro_regime_score": macro.regime_score}
+            else:
+                flow_signals["macro_regime_score"] = macro.regime_score
+
+        # 7. Score the signal
         top_sources = sorted(
             signal.source_breakdown.keys(),
             key=lambda s: signal.source_breakdown[s].mention_count,
@@ -134,6 +168,30 @@ class StockAlphaEngine:
             self._depth[snap.symbol].append(snap)
         except Exception as e:
             log.debug("Failed to ingest depth: %s", e)
+
+    def ingest_insider_trade(self, data: dict):
+        """Ingest an insider trade from finance.insider.trades."""
+        self._insider.ingest(data)
+
+    def ingest_macro(self, data: dict):
+        """Ingest a FRED macro data point from finance.macro.fred."""
+        self._macro.ingest(data)
+
+    # ------------------------------------------------------------------
+    # Phase 2 accessors (for API endpoint)
+    # ------------------------------------------------------------------
+
+    def get_sentiment_velocity(self, ticker: str):
+        """Get sentiment velocity for a ticker (for API)."""
+        return self._velocity.compute(ticker)
+
+    def get_insider_score(self, ticker: str):
+        """Get insider score for a ticker (for API)."""
+        return self._insider.compute(ticker)
+
+    def get_macro_regime(self):
+        """Get current macro regime classification (for API)."""
+        return self._macro.classify()
 
     # ------------------------------------------------------------------
     # Microstructure & order flow computation
@@ -243,9 +301,14 @@ class StockAlphaEngine:
     def teardown(self):
         self._analyzer.teardown()
         self._svc.cleanup()
+        self._velocity.cleanup()
+        self._insider.cleanup()
 
     @property
     def stats(self) -> dict:
         return {
             "tickers_tracked": len(self._svc.get_tracked_tickers()),
+            "velocity_tracked": len(self._velocity.get_tracked_tickers()),
+            "insider_tracked": len(self._insider.get_tracked_tickers()),
+            "macro_regime": getattr(self._macro.classify(), "regime", "unknown"),
         }
