@@ -199,6 +199,18 @@ services:
         --config retention.ms=604800000
 
       kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic finance.finviz.news --partitions 3 --replication-factor 1 \
+        --config retention.ms=604800000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic tech.techmeme.articles --partitions 3 --replication-factor 1 \
+        --config retention.ms=604800000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+        --topic gov.sam.opportunities --partitions 3 --replication-factor 1 \
+        --config retention.ms=2592000000
+
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
         --topic stock.alpha.predictions --partitions 6 --replication-factor 1 \
         --config retention.ms=2592000000
 

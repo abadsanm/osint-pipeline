@@ -29,6 +29,9 @@ class NormalizationConfig:
         "tech.producthunt.comments",
         "tech.techcrunch.articles",
         "finance.seeking_alpha.articles",
+        "finance.finviz.news",
+        "tech.techmeme.articles",
+        "gov.sam.opportunities",
     ]
 
     OUTPUT_TOPIC = "osint.normalized"
