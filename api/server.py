@@ -221,6 +221,7 @@ def _consume_raw_topics():
         "finance.reddit.posts", "finance.reddit.comments",
         "trends.google.interest",
         "finance.news.articles", "finance.options.flow",
+        "tech.techcrunch.articles", "finance.seeking_alpha.articles",
     ]
 
     consumer = Consumer({

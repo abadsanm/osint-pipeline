@@ -27,6 +27,8 @@ class NormalizationConfig:
         "finance.insider.trades",
         "tech.producthunt.launches",
         "tech.producthunt.comments",
+        "tech.techcrunch.articles",
+        "finance.seeking_alpha.articles",
     ]
 
     OUTPUT_TOPIC = "osint.normalized"
