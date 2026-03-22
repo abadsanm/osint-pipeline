@@ -1608,22 +1608,49 @@ def get_pulse_charts(
     """Chart card datasets for the Global Pulse page, built from live entity_mentions."""
     ECONOMIC_KEYWORDS = {
         "interest rate": "Interest Rates",
-        "federal reserve": "Fed Policy",
-        "fed funds": "Fed Policy",
+        "federal reserve": "Interest Rates",
+        "fed funds": "Interest Rates",
+        "rate hike": "Interest Rates",
+        "rate cut": "Interest Rates",
         "employment": "Employment",
         "unemployment": "Employment",
         "jobs report": "Employment",
+        "labor market": "Employment",
+        "hiring": "Employment",
+        "layoff": "Employment",
         "inflation": "Inflation",
         "cpi": "Inflation",
+        "price index": "Inflation",
+        "deflation": "Inflation",
         "gdp": "GDP Growth",
         "gross domestic": "GDP Growth",
+        "economic growth": "GDP Growth",
         "housing": "Housing",
         "mortgage": "Housing",
+        "real estate": "Housing",
+        "home sales": "Housing",
         "treasury": "Treasury",
         "yield curve": "Treasury",
+        "bond": "Treasury",
+        "10 year": "Treasury",
         "recession": "Recession Risk",
+        "downturn": "Recession Risk",
+        "bear market": "Recession Risk",
         "consumer spending": "Consumer",
         "retail sales": "Consumer",
+        "consumer confidence": "Consumer",
+        "tariff": "Trade Policy",
+        "trade war": "Trade Policy",
+        "sanctions": "Trade Policy",
+        "oil price": "Energy",
+        "opec": "Energy",
+        "natural gas": "Energy",
+        "crypto": "Crypto",
+        "bitcoin": "Crypto",
+        "ethereum": "Crypto",
+        "regulation": "Regulation",
+        "antitrust": "Regulation",
+        "sec ": "Regulation",
     }
     # Pre-compile word-boundary patterns for strict matching
     _ECONOMIC_PATTERNS = {
@@ -1652,23 +1679,37 @@ def get_pulse_charts(
         })
 
     # --- topSectors: highest sentiment entities with enough data ---
+    # Prefer entities from multiple sources or with short names (likely tickers/companies)
     top_candidates = [
         e for e in entities
         if e["_tf_volume"] >= 5 and e["_tf_sent_count"] > 0
     ]
-    top_candidates.sort(
-        key=lambda e: e["_tf_sent_sum"] / e["_tf_sent_count"],
-        reverse=True,
-    )
+    # Score: sentiment * (1 + source_diversity_bonus)
+    def _sector_rank(e):
+        avg_sent = e["_tf_sent_sum"] / e["_tf_sent_count"]
+        num_sources = len(e.get("sources", {})) if isinstance(e.get("sources"), dict) else 1
+        # Prefer short labels (tickers) and multi-source entities
+        name_bonus = 1.2 if len(e.get("id", "")) <= 6 else 1.0
+        source_bonus = 1.0 + (num_sources - 1) * 0.3
+        return avg_sent * source_bonus * name_bonus
+
+    top_candidates.sort(key=_sector_rank, reverse=True)
     top_sectors = []
-    for e in top_candidates[:5]:
+    seen_names = set()
+    for e in top_candidates:
+        name = e["id"] if len(e["id"]) <= 15 else e["label"][:20]
+        if name.lower() in seen_names:
+            continue
+        seen_names.add(name.lower())
         avg = e["_tf_sent_sum"] / e["_tf_sent_count"]
         top_sectors.append({
-            "name": e["label"],
+            "name": name,
             "score": round(avg * 100),
             "volume": e["_tf_volume"],
             "sources": dict(e["sources"]) if isinstance(e["sources"], dict) else {},
         })
+        if len(top_sectors) >= 5:
+            break
 
     # --- emergingRisks: negative sentiment, high volume ---
     risk_candidates = [
@@ -1679,23 +1720,31 @@ def get_pulse_charts(
     ]
     risk_candidates.sort(key=lambda e: e["_tf_volume"], reverse=True)
     emerging_risks = []
-    for e in risk_candidates[:5]:
+    seen_risk_names = set()
+    for e in risk_candidates:
+        name = e["id"] if len(e["id"]) <= 15 else e["label"][:20]
+        if name.lower() in seen_risk_names:
+            continue
+        seen_risk_names.add(name.lower())
         avg = e["_tf_sent_sum"] / e["_tf_sent_count"]
         emerging_risks.append({
-            "name": e["label"],
+            "name": name,
             "score": round((1.0 - avg) * 100),
             "volume": e["_tf_volume"],
             "sources": dict(e["sources"]) if isinstance(e["sources"], dict) else {},
         })
+        if len(emerging_risks) >= 5:
+            break
 
     # --- economicSentiments: entities matching economic keywords (word-boundary) ---
     # Aggregate by canonical category so "CPI" and "inflation" both map to "Inflation"
     _econ_category_agg: dict[str, dict] = {}  # category -> {volume, sent_sum, sent_count, sources}
     for e in entities:
-        label = e["label"]
+        # Search label, id, and keywords for economic terms
+        search_text = f"{e.get('label', '')} {e.get('id', '')} {' '.join(e.get('keywords', []))}"
         matched_category = None
         for _kw, (pattern, category) in _ECONOMIC_PATTERNS.items():
-            if pattern.search(label):
+            if pattern.search(search_text):
                 matched_category = category
                 break
         if not matched_category:
