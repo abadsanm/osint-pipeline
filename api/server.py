@@ -1332,8 +1332,15 @@ def get_settings():
 def update_settings(body: dict):
     """Deep-merge incoming settings with current settings and persist."""
     global _settings
+    old_watchlist = set(_settings.get("watchlist", []))
     _settings = _deep_merge(_settings, body)
     _save_settings(_settings)
+
+    # Enrich any newly added watchlist tickers
+    new_watchlist = set(_settings.get("watchlist", []))
+    for ticker in new_watchlist - old_watchlist:
+        _trigger_enrichment(ticker)
+
     return _settings
 
 
@@ -1343,6 +1350,145 @@ def get_setting(key: str):
     if key not in _settings:
         raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
     return {key: _settings[key]}
+
+
+# ---------------------------------------------------------------------------
+# Ticker Enrichment — auto-ingest data when ticker added to watchlist/research
+# ---------------------------------------------------------------------------
+
+_enrichment_in_progress: set[str] = set()
+
+def _enrich_ticker_background(ticker: str):
+    """Fetch news and data for a ticker and inject into entity_mentions.
+    Called in a background thread when ticker is added to watchlist/research."""
+    ticker = ticker.upper().strip()
+    if ticker in _enrichment_in_progress or len(ticker) > 6:
+        return
+    _enrichment_in_progress.add(ticker)
+
+    try:
+        import requests as _req
+
+        # 1. Fetch from Finviz news for this ticker
+        try:
+            resp = _req.get(
+                f"https://finviz.com/quote.ashx?t={ticker}",
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                import re
+                # Extract news headlines from the page
+                headlines = re.findall(r'class="tab-link-nw"[^>]*>([^<]+)</a>', resp.text)
+                for hl in headlines[:10]:
+                    _inject_entity_mention(ticker, hl, "finviz", score=50)
+        except Exception:
+            pass
+
+        # 2. Fetch from Yahoo Finance news
+        try:
+            import yfinance as yf
+            t = yf.Ticker(ticker)
+            news = t.news or []
+            for article in news[:10]:
+                title = article.get("title", "")
+                if title:
+                    _inject_entity_mention(ticker, title, "yahoo_news", score=60)
+        except Exception:
+            pass
+
+        # 3. Fetch from Seeking Alpha RSS (check if ticker mentioned)
+        try:
+            resp = _req.get(
+                f"https://seekingalpha.com/api/sa/combined/{ticker}.xml",
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                from xml.etree import ElementTree
+                root = ElementTree.fromstring(resp.text)
+                for item in root.findall(".//item")[:10]:
+                    title = item.findtext("title", "")
+                    if title:
+                        _inject_entity_mention(ticker, title, "seeking_alpha", score=70)
+        except Exception:
+            pass
+
+        # 4. Get company info for better labeling
+        try:
+            import yfinance as yf
+            info = yf.Ticker(ticker).info
+            name = info.get("longName") or info.get("shortName") or ticker
+            _inject_entity_mention(ticker, f"{name} ({ticker})", "yfinance", score=50)
+        except Exception:
+            pass
+
+        log.info("Enrichment complete for %s", ticker)
+
+    except Exception as e:
+        log.warning("Enrichment failed for %s: %s", ticker, e)
+    finally:
+        _enrichment_in_progress.discard(ticker)
+
+
+def _inject_entity_mention(entity_id: str, title: str, source: str, score: float = 50):
+    """Inject a synthetic entity mention into the in-memory store."""
+    import math
+    with _lock:
+        if entity_id not in entity_mentions:
+            entity_mentions[entity_id] = {
+                "id": entity_id,
+                "label": entity_id,
+                "volume": 0,
+                "sentiment_sum": 0.0,
+                "sentiment_count": 0,
+                "sources": defaultdict(int),
+                "keywords": [],
+                "sample_docs": [],
+                "last_seen": None,
+            }
+        em = entity_mentions[entity_id]
+        em["volume"] += 1
+        em["sources"][source] += 1
+        em["last_seen"] = datetime.now(timezone.utc).isoformat()
+
+        if score > 0:
+            norm = 0.3 + 0.6 * min(1.0, math.log1p(score) / math.log1p(1000))
+            em["sentiment_sum"] += norm
+            em["sentiment_count"] += 1
+
+        if title and (em["label"] == entity_id or em["label"].isdigit()):
+            em["label"] = title[:60]
+
+        if title and len(em["keywords"]) < 8:
+            words = [w for w in title.split() if len(w) > 3][:3]
+            em["keywords"] = list(set(em["keywords"] + words))[:8]
+
+        if len(em["sample_docs"]) < 10:
+            em["sample_docs"].append({
+                "title": title[:120],
+                "source": source,
+                "url": None,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "score": score,
+            })
+
+
+def _trigger_enrichment(ticker: str):
+    """Start background enrichment for a ticker."""
+    t = threading.Thread(target=_enrich_ticker_background, args=(ticker,), daemon=True)
+    t.start()
+
+
+@app.post("/api/enrich/{ticker}")
+def enrich_ticker(ticker: str):
+    """Manually trigger data enrichment for a ticker. Fetches news from
+    Finviz, Yahoo Finance, and Seeking Alpha in the background."""
+    ticker = ticker.upper().strip()
+    if not ticker or len(ticker) > 6:
+        return {"status": "invalid", "ticker": ticker}
+    _trigger_enrichment(ticker)
+    return {"status": "enriching", "ticker": ticker, "message": f"Fetching data for {ticker} in background"}
 
 
 # ---------------------------------------------------------------------------
@@ -1384,6 +1530,12 @@ def create_research_item(request: dict):
         "current_mention_count": request.get("mention_count", 0),
     }
     db.add_research_item(item)
+
+    # Auto-enrich: fetch news/data for this entity
+    entity_id = item.get("entity_id", "")
+    if entity_id and len(entity_id) <= 6 and entity_id.isalpha():
+        _trigger_enrichment(entity_id)
+
     return item
 
 

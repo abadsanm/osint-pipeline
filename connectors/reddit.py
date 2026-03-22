@@ -80,6 +80,11 @@ class RedditConfig:
         "Bitcoin",
         "ethereum",
         "CryptoMarkets",
+        # Semiconductors / Hardware
+        "semiconductors",
+        "chipdesign",
+        "AMD_Stock",
+        "NVDA_Stock",
         # Tech / Product
         "technology",
         "gadgets",
