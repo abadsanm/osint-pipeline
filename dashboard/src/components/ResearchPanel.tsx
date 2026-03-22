@@ -82,8 +82,9 @@ export default function ResearchPanel({ open, onClose }: ResearchPanelProps) {
     try {
       const res = await fetch(`${API_BASE}/research`);
       if (res.ok) {
-        const data: ResearchItem[] = await res.json();
-        setItems(Array.isArray(data) ? data : []);
+        const raw = await res.json();
+        const data: ResearchItem[] = Array.isArray(raw) ? raw : raw?.items || [];
+        setItems(data);
       }
     } catch {
       // API unavailable
