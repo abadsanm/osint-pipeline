@@ -2205,9 +2205,13 @@ async def get_alpha(ticker: str):
     # --- 4. Signal scorecard from signals deque ---
     signal_data = None
     with _lock:
-        for sig in reversed(signals):
+        # Search signals by ticker and known aliases
+        alias_set = {ticker}
+        for alias in _TICKER_ALIASES.get(ticker, []):
+            alias_set.add(alias.upper())
+        for sig in reversed(list(signals)):
             sig_ticker = (sig.get("ticker") or "").upper()
-            if sig_ticker == ticker:
+            if sig_ticker in alias_set:
                 signal_data = {
                     "confidence": sig.get("confidence"),
                     "type": sig.get("type"),
@@ -2215,6 +2219,19 @@ async def get_alpha(ticker: str):
                     "sources": list(sig.get("sources", {}).keys()) if isinstance(sig.get("sources"), dict) else [],
                 }
                 break
+
+    # Fallback: generate signal from entity data if we have sentiment
+    if not signal_data and em and em.get("volume", 0) > 5:
+        vol = em.get("volume", 0)
+        sources_dict = dict(em.get("sources", {})) if isinstance(em.get("sources"), dict) else {}
+        num_sources = len(sources_dict)
+        sent_label = sentiment_data.get("label", "neutral")
+        signal_data = {
+            "confidence": min(0.8, 0.3 + num_sources * 0.15),
+            "type": "volume_spike" if vol > 100 else "multi_source_convergence" if num_sources > 1 else "single_source",
+            "headline": f"{ticker} mentioned {vol} times across {num_sources} source{'s' if num_sources != 1 else ''} — sentiment {sent_label}",
+            "sources": list(sources_dict.keys()),
+        }
 
     # --- 5. Build score breakdown ---
     score_data = {
