@@ -67,8 +67,17 @@ def _check_account_age(window: WindowSlice) -> str | None:
 
 
 def _check_temporal_burst(window: WindowSlice) -> str | None:
-    """Flag if >70% of mentions arrive within a 5-minute sub-window."""
-    if len(window.mentions) < 3:
+    """Flag if >70% of mentions arrive within a 5-minute sub-window.
+
+    Requires at least 2 distinct sources to avoid false positives from
+    single-source batch ingestion (e.g., HN connector polling).
+    """
+    if len(window.mentions) < 5:
+        return None
+
+    # Don't flag single-source bursts — these are usually batch ingestion
+    sources = {m.source for m in window.mentions}
+    if len(sources) < 2:
         return None
 
     burst_window = timedelta(
@@ -126,9 +135,18 @@ def _check_cross_platform_sync(window: WindowSlice) -> str | None:
 
 
 def _check_template_content(window: WindowSlice) -> str | None:
-    """Flag if >30% of mentions have near-identical content (same dedup_hash)."""
+    """Flag if >30% of mentions have near-identical content (same dedup_hash).
+
+    Requires at least 2 sources and 5+ mentions with hashes to avoid
+    false positives from single-source content patterns.
+    """
     hashes = [m.dedup_hash for m in window.mentions if m.dedup_hash]
-    if len(hashes) < 3:
+    if len(hashes) < 5:
+        return None
+
+    # Don't flag single-source — similar short comments are normal
+    sources = {m.source for m in window.mentions}
+    if len(sources) < 2:
         return None
 
     # Count hash frequencies (exact matches via dedup_hash)

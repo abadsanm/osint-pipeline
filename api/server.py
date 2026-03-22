@@ -2206,32 +2206,58 @@ async def get_alpha(ticker: str):
     signal_data = None
     with _lock:
         # Search signals by ticker and known aliases
+        # Prefer non-anomaly signals over anomaly-only signals
         alias_set = {ticker}
         for alias in _TICKER_ALIASES.get(ticker, []):
             alias_set.add(alias.upper())
+
+        best_signal = None
+        anomaly_signal = None
         for sig in reversed(list(signals)):
             sig_ticker = (sig.get("ticker") or "").upper()
             if sig_ticker in alias_set:
-                signal_data = {
-                    "confidence": sig.get("confidence"),
-                    "type": sig.get("type"),
-                    "headline": sig.get("headline"),
-                    "sources": list(sig.get("sources", {}).keys()) if isinstance(sig.get("sources"), dict) else [],
-                }
-                break
+                headline = sig.get("headline", "")
+                if "Anomaly" not in headline:
+                    best_signal = sig
+                    break
+                elif not anomaly_signal:
+                    anomaly_signal = sig
 
-    # Fallback: generate signal from entity data if we have sentiment
-    if not signal_data and em and em.get("volume", 0) > 5:
+        chosen = best_signal or anomaly_signal
+        if chosen:
+            signal_data = {
+                "confidence": chosen.get("confidence"),
+                "type": chosen.get("type"),
+                "headline": chosen.get("headline"),
+                "sources": list(chosen.get("sources", {}).keys()) if isinstance(chosen.get("sources"), dict) else [],
+            }
+
+    # Always generate a context-rich signal from entity data
+    if em and em.get("volume", 0) > 0:
         vol = em.get("volume", 0)
         sources_dict = dict(em.get("sources", {})) if isinstance(em.get("sources"), dict) else {}
         num_sources = len(sources_dict)
         sent_label = sentiment_data.get("label", "neutral")
-        signal_data = {
-            "confidence": min(0.8, 0.3 + num_sources * 0.15),
-            "type": "volume_spike" if vol > 100 else "multi_source_convergence" if num_sources > 1 else "single_source",
-            "headline": f"{ticker} mentioned {vol} times across {num_sources} source{'s' if num_sources != 1 else ''} — sentiment {sent_label}",
-            "sources": list(sources_dict.keys()),
-        }
+        sent_score = sentiment_data.get("score")
+        sent_pct = f" ({int(sent_score * 100)}%)" if sent_score is not None else ""
+
+        entity_headline = (
+            f"{ticker} detected across {num_sources} source{'s' if num_sources != 1 else ''} "
+            f"({', '.join(sources_dict.keys())}) with {vol:,} mentions — "
+            f"sentiment {sent_label}{sent_pct}"
+        )
+
+        if not signal_data:
+            signal_data = {
+                "confidence": min(0.8, 0.3 + num_sources * 0.15),
+                "type": "volume_spike" if vol > 100 else "multi_source_convergence" if num_sources > 1 else "monitoring",
+                "headline": entity_headline,
+                "sources": list(sources_dict.keys()),
+            }
+        elif signal_data.get("headline", "").startswith("Anomaly"):
+            # Replace cryptic anomaly headline with informative context
+            signal_data["headline"] = entity_headline
+            signal_data["anomaly_note"] = "Pipeline flagged unusual mention patterns — may indicate coordinated activity or batch ingestion artifacts"
 
     # --- 5. Build score breakdown ---
     score_data = {
