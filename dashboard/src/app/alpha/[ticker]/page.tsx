@@ -1645,7 +1645,7 @@ export default function FinancialAlphaPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-5">
+          <div className="flex flex-wrap items-center gap-3">
             {/* Price & change */}
             <div className="text-right">
               <p className="font-mono text-2xl font-semibold">${data.price?.toFixed(2) ?? "--"}</p>
@@ -1678,7 +1678,7 @@ export default function FinancialAlphaPage() {
                   }
                 } catch { /* ignore */ }
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-surface-alt text-text-muted border border-border rounded-md hover:text-bullish hover:border-bullish/30 transition-colors"
+              className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium bg-surface-alt text-text-muted border border-border rounded-md hover:text-bullish hover:border-bullish/30 transition-colors"
               title="Add to watchlist"
             >
               + Watch
@@ -1687,10 +1687,10 @@ export default function FinancialAlphaPage() {
             {/* AI Analysis button */}
             <button
               onClick={() => setShowAnalysis(true)}
-              className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium bg-accent-blue/10 text-accent-blue border border-accent-blue/20 rounded-md hover:bg-accent-blue/20 transition-colors"
+              className="flex items-center gap-1.5 px-2 py-1 text-xs font-medium bg-accent-blue/10 text-accent-blue border border-accent-blue/20 rounded-md hover:bg-accent-blue/20 transition-colors"
             >
-              <Brain size={16} />
-              AI Analysis
+              <Brain size={14} />
+              Analyze
             </button>
           </div>
         </div>
