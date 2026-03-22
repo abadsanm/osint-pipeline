@@ -2279,13 +2279,37 @@ async def get_alpha(ticker: str):
         # Sentiment component
         if sentiment_data["score"] is not None:
             components.append("sentiment")
-            # Map 0-1 sentiment to -1..+1
             raw_parts["sentiment"] = (sentiment_data["score"] - 0.5) * 2
+
+        # SVC (Sentiment Volume Convergence) component
+        # Compute from sentiment timeline: sentiment_shift x volume_change
+        try:
+            timeline = sentiment_data.get("timeline", [])
+            if len(timeline) >= 4:
+                recent = timeline[-2:]
+                prior = timeline[-4:-2]
+                recent_avg = sum(t["sentiment"] for t in recent) / len(recent)
+                prior_avg = sum(t["sentiment"] for t in prior) / len(prior)
+                sentiment_shift = recent_avg - prior_avg
+                recent_vol = sum(t.get("count", 1) for t in recent)
+                prior_vol = sum(t.get("count", 1) for t in prior)
+                volume_change = (recent_vol - prior_vol) / max(prior_vol, 1)
+                svc_value = sentiment_shift * volume_change
+                svc_normalized = max(-1.0, min(1.0, svc_value * 10))
+                components.append("svc")
+                raw_parts["svc"] = svc_normalized
+            elif sentiment_data.get("volume", 0) > 10 and sentiment_data["score"] is not None:
+                # Fallback: derive SVC from overall sentiment deviation from neutral
+                deviation = (sentiment_data["score"] - 0.5) * 2
+                volume_factor = min(1.0, sentiment_data["volume"] / 100)
+                components.append("svc")
+                raw_parts["svc"] = max(-1.0, min(1.0, deviation * volume_factor))
+        except Exception:
+            pass
 
         # Technical component
         if technicals_snapshot and technicals_snapshot.get("rsi") is not None:
             components.append("technical")
-            # Simple tech score from RSI and MACD
             rsi_val = technicals_snapshot["rsi"]
             tech_s = 0.0
             if rsi_val < 30:
@@ -2295,7 +2319,75 @@ async def get_alpha(ticker: str):
             macd_h = (technicals_snapshot.get("macd") or {}).get("histogram")
             if macd_h is not None:
                 tech_s += max(-1.0, min(1.0, macd_h * 5))
+            bb_pctb = (technicals_snapshot.get("bb") or {}).get("pctb")
+            if bb_pctb is not None:
+                if bb_pctb < 0.2:
+                    tech_s += 0.3
+                elif bb_pctb > 0.8:
+                    tech_s -= 0.3
+            sma20 = technicals_snapshot.get("sma20")
+            if sma20 and price:
+                if price > sma20:
+                    tech_s += 0.2
+                else:
+                    tech_s -= 0.2
             raw_parts["technical"] = max(-1.0, min(1.0, tech_s / 2))
+
+        # Microstructure component
+        # Derive from price position relative to key levels
+        try:
+            if technicals_snapshot and price:
+                micro_signals = []
+                # Price vs SMA20 (proxy for VWAP when no real-time data)
+                sma20 = technicals_snapshot.get("sma20")
+                if sma20 and sma20 > 0:
+                    vwap_pos = (price - sma20) / sma20
+                    micro_signals.append(max(-1.0, min(1.0, vwap_pos * 10)))
+                # BB %B as volume profile proxy
+                bb_pctb = (technicals_snapshot.get("bb") or {}).get("pctb")
+                if bb_pctb is not None:
+                    micro_signals.append((bb_pctb - 0.5) * 2)
+                # ATR-based volatility
+                atr = technicals_snapshot.get("atr")
+                if atr and price and price > 0:
+                    atr_pct = atr / price
+                    # High volatility = opportunity but also risk
+                    micro_signals.append(-0.3 if atr_pct > 0.03 else 0.1)
+                if micro_signals:
+                    components.append("microstructure")
+                    raw_parts["microstructure"] = sum(micro_signals) / len(micro_signals)
+        except Exception:
+            pass
+
+        # Order Flow component
+        # Derive from volume patterns and price action
+        try:
+            if hist is not None and not hist.empty and len(hist) >= 5:
+                import numpy as np
+                recent_5 = hist.tail(5)
+                # Volume trend (rising volume = conviction)
+                vol_trend = 0.0
+                if "volume" in recent_5.columns:
+                    vols = recent_5["volume"].values
+                    if len(vols) >= 2 and vols[-2] > 0:
+                        vol_trend = (vols[-1] - vols[-2]) / vols[-2]
+                # Price-volume divergence
+                price_trend = 0.0
+                if "close" in recent_5.columns:
+                    closes = recent_5["close"].values
+                    if len(closes) >= 2 and closes[-2] > 0:
+                        price_trend = (closes[-1] - closes[-2]) / closes[-2]
+                # If price up + volume up = bullish flow
+                # If price down + volume up = bearish flow (selling pressure)
+                flow_score = 0.0
+                if vol_trend > 0.1:
+                    flow_score = 0.5 if price_trend > 0 else -0.5
+                elif vol_trend < -0.1:
+                    flow_score = -0.2 if price_trend < 0 else 0.2
+                components.append("order_flow")
+                raw_parts["order_flow"] = max(-1.0, min(1.0, flow_score))
+        except Exception:
+            pass
 
         # Correlation component
         if signal_data and signal_data.get("confidence") is not None:
