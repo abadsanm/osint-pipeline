@@ -83,7 +83,7 @@ export default function ResearchPanel({ open, onClose }: ResearchPanelProps) {
       const res = await fetch(`${API_BASE}/research`);
       if (res.ok) {
         const data: ResearchItem[] = await res.json();
-        setItems(data);
+        setItems(Array.isArray(data) ? data : []);
       }
     } catch {
       // API unavailable
@@ -187,7 +187,7 @@ export default function ResearchPanel({ open, onClose }: ResearchPanelProps) {
     return next;
   };
 
-  const filteredItems = items.filter((item) => {
+  const filteredItems = (items || []).filter((item) => {
     if (filter === "all") return true;
     return item.status === filter;
   });

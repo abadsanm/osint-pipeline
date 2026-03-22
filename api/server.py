@@ -1313,25 +1313,37 @@ def _fetch_macro_timeline() -> list[dict]:
     try:
         import yfinance as yf
 
-        # Get 6 months of weekly data
+        # Get 6 months of weekly data — flatten MultiIndex columns from yfinance
         spy = yf.download("SPY", period="6mo", interval="1wk", progress=False)
         vix = yf.download("^VIX", period="6mo", interval="1wk", progress=False)
         tny = yf.download("^TNX", period="6mo", interval="1wk", progress=False)
+        # Flatten MultiIndex columns if present
+        for df in [spy, vix, tny]:
+            if hasattr(df.columns, "levels") and df.columns.nlevels > 1:
+                df.columns = df.columns.get_level_values(0)
 
         timeline: list[dict] = []
         for date in spy.index:
             date_str = date.strftime("%Y-%m-%d")
+            try:
+                sp_close = float(spy.loc[date, "Close"])
+            except Exception:
+                continue
             entry: dict = {
                 "date": date_str,
-                "sp500": round(float(spy.loc[date, "Close"]), 1),
-                "sentiment": 50,  # Will be overwritten with actual pipeline sentiment
+                "sp500": round(sp_close, 1),
+                "sentiment": 50,
             }
-            # Match VIX
-            if date in vix.index:
-                entry["vix"] = round(float(vix.loc[date, "Close"]), 1)
-            # Match 10Y yield
-            if date in tny.index:
-                entry["treasury10y"] = round(float(tny.loc[date, "Close"]), 2)
+            try:
+                if date in vix.index:
+                    entry["vix"] = round(float(vix.loc[date, "Close"]), 1)
+            except Exception:
+                pass
+            try:
+                if date in tny.index:
+                    entry["treasury10y"] = round(float(tny.loc[date, "Close"]), 2)
+            except Exception:
+                pass
             timeline.append(entry)
 
         _macro_chart_cache["data"] = timeline
