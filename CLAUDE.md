@@ -44,6 +44,13 @@ docker exec osint-kafka kafka-console-consumer \
 
 # Kafka UI at http://localhost:8080
 
+# === Prediction Engine ===
+python -m stock_alpha                    # Scoring + predictions → Kafka
+python -m stock_alpha.tracker            # Evaluate predictions against outcomes
+
+# === Backtesting ===
+python -m backtesting --start 2024-01-01 --end 2025-03-01 --tickers SPY,QQQ,AAPL,MSFT,NVDA
+
 # === Dashboard Frontend ===
 cd dashboard
 npm install
@@ -109,8 +116,31 @@ Source Connectors → Raw Kafka Topics → Normalization (fastText/spaCy/SimHash
   - `technicals.py` — yfinance OHLCV + pandas-ta indicators (RSI, MACD, BB, SMA/EMA, ATR, OBV)
   - `microstructure.py` — Anchored VWAP, volume profile (POC/value area), fair value gap detection
   - `order_flow.py` — Order flow delta (buy/sell imbalance), liquidity sweep detection
-  - `scorer.py` — Rule-based weighted scorer: sentiment 25% + SVC 15% + technicals 20% + microstructure 15% + order_flow 15% + correlation 10%
-  - `engine.py` — Orchestrates FinBERT → SVC → technicals → microstructure → order flow → scoring per ticker
+  - `scorer.py` — Rule-based + XGBoost ensemble scorer with calibration
+  - `engine.py` — Orchestrates scoring → regime → predictions → ensemble → Kafka publish
+  - `regime.py` — Market regime detection (SMA slope, ATR percentile, Hurst exponent)
+  - `forecaster.py` — Prophet baseline + LSTM time-series forecaster
+  - `ensemble.py` — Multi-model voting with regime-weighted accuracy
+  - `tracker.py` — Kafka consumer evaluating predictions against actual outcomes
+  - `sentiment_velocity.py` — Rate of change of sentiment per ticker
+  - `insider_scoring.py` — Insider trade aggregation with C-suite weighting
+  - `macro_regime.py` — FRED-based macro environment classification
+  - `feature_store.py` — SQLite feature snapshots for ML training (33 features)
+  - `ml_scorer.py` — LightGBM ensemble with probability calibration
+  - `cross_validation.py` — Fleiss' kappa cross-source statistical agreement
+  - `backtester.py` — Signal accuracy tracking with forward return evaluation
+  - `models/` — Saved XGBoost, calibrator, and LightGBM models
+
+- **`backtesting/`** — Historical backtesting framework
+  - `data_loader.py` — yfinance historical data + synthetic sentiment features
+  - `simulator.py` — Day-by-day scoring with forward return evaluation
+  - `metrics.py` — Accuracy, Sharpe, profit factor, max drawdown, calibration curve
+  - `trainer.py` — XGBoost walk-forward training (70/30 split)
+  - `calibrator.py` — Isotonic regression for probability calibration
+  - `__main__.py` — CLI: `python -m backtesting --start --end --tickers`
+
+- **`schemas/`** (additional)
+  - `prediction.py` — `Prediction`, `PredictionBatch` with decay, horizons, outcomes
 
 - **`product_ideation/`** — Product Ideation value engine
   - `absa.py` — PyABSA aspect extraction with spaCy noun-chunk fallback
