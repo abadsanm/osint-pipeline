@@ -465,6 +465,19 @@ async def wait_for_kafka(bootstrap_servers: str, timeout: int = 60):
 # ---------------------------------------------------------------------------
 
 def load_config_from_env():
+    # Load .env file
+    from pathlib import Path
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if env_path.exists():
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, _, v = line.partition("=")
+                    k, v = k.strip(), v.strip()
+                    if v and k not in os.environ:
+                        os.environ[k] = v
+
     key = os.environ.get("FRED_API_KEY")
     if key:
         FredConfig.FRED_API_KEY = key
