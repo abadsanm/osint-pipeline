@@ -398,8 +398,18 @@ export default function Header({ title }: HeaderProps) {
               {searchLoading && (
                 <div className="px-3 py-2 text-xs text-text-muted">Searching...</div>
               )}
-              {!searchLoading && searchResults.length === 0 && (
-                <div className="px-3 py-2 text-xs text-text-muted">No results found</div>
+              {!searchLoading && searchResults.length === 0 && query.trim().length >= 2 && (
+                <div className="px-3 py-3 text-center">
+                  <p className="text-xs text-text-muted mb-2">No results in pipeline</p>
+                  <a
+                    href={`https://www.google.com/search?q=${encodeURIComponent(query.trim())}+stock+market`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-accent-blue bg-accent-blue/10 border border-accent-blue/20 rounded-md hover:bg-accent-blue/20 transition-colors"
+                  >
+                    Search Google →
+                  </a>
+                </div>
               )}
               {searchResults.map((r, i) => {
                 const sl = sentimentLabel(r.sentiment);

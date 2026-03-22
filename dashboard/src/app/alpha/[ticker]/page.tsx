@@ -334,7 +334,7 @@ function MACDCard({
         </InfoTooltip>
       </div>
 
-      {macd === null ? (
+      {!macd ? (
         <p className="text-sm text-text-muted text-center py-6">Awaiting data</p>
       ) : (
         <>
@@ -1686,9 +1686,9 @@ export default function FinancialAlphaPage() {
 
           {/* Technical Indicators Sidebar */}
           <div className="space-y-module-gap">
-            <RSIGauge value={data.technicals.rsi} />
-            <MACDCard macd={data.technicals.macd} series={data.technicals_series} />
-            <BollingerCard bb={data.technicals.bb} />
+            <RSIGauge value={data.technicals?.rsi} />
+            <MACDCard macd={data.technicals?.macd ?? null} series={data.technicals_series} />
+            <BollingerCard bb={data.technicals?.bb ?? null} />
           </div>
         </div>
 
