@@ -247,10 +247,18 @@ class MLScorer:
             return model
 
         try:
-            calibrated = CalibratedClassifierCV(
-                model, method="isotonic", cv="prefit"
-            )
-            calibrated.fit(X_val, y_val)
+            # sklearn >= 1.5 removed cv="prefit", use estimator= instead
+            import sklearn
+            sk_version = tuple(int(x) for x in sklearn.__version__.split(".")[:2])
+            if sk_version >= (1, 5):
+                from sklearn.calibration import CalibratedClassifierCV as CCV
+                calibrated = CCV(estimator=model, method="isotonic", cv=2)
+                calibrated.fit(X_val, y_val)
+            else:
+                calibrated = CalibratedClassifierCV(
+                    model, method="isotonic", cv="prefit"
+                )
+                calibrated.fit(X_val, y_val)
             log.info("Calibrated probabilities for %s using isotonic regression", label)
             return calibrated
         except Exception:
@@ -323,15 +331,20 @@ class MLScorer:
         log.info("Starting ML ensemble model training...")
 
         # 1. Fetch labelled feature matrix
-        (
-            X,
-            y_dir_1d,
-            y_dir_5d,
-            y_ret_1d,
-            feature_names,
-            timestamps,
-            tickers,
-        ) = feature_store.get_feature_matrix()
+        raw = feature_store.get_feature_matrix()
+        if len(raw) == 7:
+            X, y_dir_1d, y_dir_5d, y_ret_1d, feature_names, timestamps, tickers = raw
+        elif len(raw) == 5:
+            # FeatureStore returns (X, y_1d, y_5d, y_10d, feature_names)
+            X, y_1d_raw, y_5d_raw, _y_10d, feature_names = raw
+            # Convert continuous returns to direction labels (0=down, 1=flat, 2=up)
+            y_dir_1d = np.array([2 if v > 0.005 else (0 if v < -0.005 else 1) for v in y_1d_raw])
+            y_dir_5d = np.array([2 if v > 0.01 else (0 if v < -0.01 else 1) for v in y_5d_raw])
+            y_ret_1d = y_1d_raw
+            timestamps = np.arange(len(X))
+            tickers = ["UNKNOWN"] * len(X)
+        else:
+            return {"error": f"Unexpected feature matrix shape: {len(raw)} elements"}
 
         n_samples = len(X)
         if n_samples < _MIN_SAMPLES:
@@ -1041,16 +1054,19 @@ class MLScorer:
                 try:
                     booster = lgb.Booster(model_file=str(model_path))
                     clf = LGBMClassifier(**ENSEMBLE_CONFIGS[min(i, len(ENSEMBLE_CONFIGS) - 1)][1])
-                    clf._Booster = booster
-                    clf._n_features = n_features
-                    clf._n_features_in = n_features
-                    clf.fitted_ = True
-                    clf._n_classes = 3
-                    clf.classes_ = np.array([0, 1, 2])
-                    clf._le = _IdentityLabelEncoder()
-                    clf.feature_importances_ = np.array(
-                        booster.feature_importance(), dtype=np.float64
-                    )
+                    # Use object.__setattr__ to bypass LightGBM property guards
+                    _set = object.__setattr__
+                    _set(clf, "_Booster", booster)
+                    _set(clf, "_n_features", n_features)
+                    _set(clf, "_n_features_in", n_features)
+                    _set(clf, "fitted_", True)
+                    _set(clf, "_n_classes", 3)
+                    _set(clf, "_classes", np.array([0, 1, 2]))
+                    _set(clf, "_le", _IdentityLabelEncoder())
+                    try:
+                        _set(clf, "feature_importances_", np.array(booster.feature_importance(), dtype=np.float64))
+                    except Exception:
+                        pass
 
                     weight = ensemble_1d_weights[i] if i < len(ensemble_1d_weights) else 1.0
 
@@ -1080,13 +1096,14 @@ class MLScorer:
                 try:
                     booster = lgb.Booster(model_file=str(model_path))
                     clf = LGBMClassifier(**ENSEMBLE_CONFIGS[min(i, len(ENSEMBLE_CONFIGS) - 1)][1])
-                    clf._Booster = booster
-                    clf._n_features = n_features
-                    clf._n_features_in = n_features
-                    clf.fitted_ = True
-                    clf._n_classes = 3
-                    clf.classes_ = np.array([0, 1, 2])
-                    clf._le = _IdentityLabelEncoder()
+                    _set = object.__setattr__
+                    _set(clf, "_Booster", booster)
+                    _set(clf, "_n_features", n_features)
+                    _set(clf, "_n_features_in", n_features)
+                    _set(clf, "fitted_", True)
+                    _set(clf, "_n_classes", 3)
+                    _set(clf, "_classes", np.array([0, 1, 2]))
+                    _set(clf, "_le", _IdentityLabelEncoder())
 
                     weight = ensemble_5d_weights[i] if i < len(ensemble_5d_weights) else 1.0
 
@@ -1110,16 +1127,18 @@ class MLScorer:
             if legacy_1d_path.exists():
                 booster_1d = lgb.Booster(model_file=str(legacy_1d_path))
                 self._model_1d = LGBMClassifier(**LGBM_PARAMS_CLASSIFIER)
-                self._model_1d._Booster = booster_1d
-                self._model_1d._n_features = n_features
-                self._model_1d._n_features_in = n_features
-                self._model_1d.fitted_ = True
-                self._model_1d._n_classes = 3
-                self._model_1d.classes_ = np.array([0, 1, 2])
-                self._model_1d._le = _IdentityLabelEncoder()
-                self._model_1d.feature_importances_ = np.array(
-                    booster_1d.feature_importance(), dtype=np.float64
-                )
+                _set = object.__setattr__
+                _set(self._model_1d, "_Booster", booster_1d)
+                _set(self._model_1d, "_n_features", n_features)
+                _set(self._model_1d, "_n_features_in", n_features)
+                _set(self._model_1d, "fitted_", True)
+                _set(self._model_1d, "_n_classes", 3)
+                _set(self._model_1d, "_classes", np.array([0, 1, 2]))
+                _set(self._model_1d, "_le", _IdentityLabelEncoder())
+                try:
+                    _set(self._model_1d, "feature_importances_", np.array(booster_1d.feature_importance(), dtype=np.float64))
+                except Exception:
+                    pass
             elif self._ensemble_1d:
                 # Use first ensemble model as legacy
                 first = self._ensemble_1d[0][0]
@@ -1132,13 +1151,14 @@ class MLScorer:
             if legacy_5d_path.exists():
                 booster_5d = lgb.Booster(model_file=str(legacy_5d_path))
                 self._model_5d = LGBMClassifier(**LGBM_PARAMS_CLASSIFIER)
-                self._model_5d._Booster = booster_5d
-                self._model_5d._n_features = n_features
-                self._model_5d._n_features_in = n_features
-                self._model_5d.fitted_ = True
-                self._model_5d._n_classes = 3
-                self._model_5d.classes_ = np.array([0, 1, 2])
-                self._model_5d._le = _IdentityLabelEncoder()
+                _set = object.__setattr__
+                _set(self._model_5d, "_Booster", booster_5d)
+                _set(self._model_5d, "_n_features", n_features)
+                _set(self._model_5d, "_n_features_in", n_features)
+                _set(self._model_5d, "fitted_", True)
+                _set(self._model_5d, "_n_classes", 3)
+                _set(self._model_5d, "_classes", np.array([0, 1, 2]))
+                _set(self._model_5d, "_le", _IdentityLabelEncoder())
 
             # Load regressor
             reg_path = model_dir / "regressor_1d.txt"
