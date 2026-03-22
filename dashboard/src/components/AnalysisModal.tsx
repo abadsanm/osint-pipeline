@@ -295,34 +295,44 @@ export default function AnalysisModal({
         {entity.sampleDocs && entity.sampleDocs.length > 0 && (
           <div className="px-5 py-3 border-t border-border">
             <h4 className="text-[11px] uppercase tracking-widest text-text-muted font-semibold mb-2">
-              Sources
+              Sources ({entity.sampleDocs.length})
             </h4>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {entity.sampleDocs
-                .filter((d: any) => d.url || d.title)
+                .filter((d: any) => d.url || d.title || d.content || d.headline)
                 .slice(0, 5)
-                .map((doc: any, i: number) => (
-                  <div key={i} className="flex items-start gap-2 text-xs">
-                    <span className="text-text-muted flex-shrink-0 mt-0.5 w-16 text-right font-mono">
-                      {doc.source || "unknown"}
-                    </span>
-                    {doc.url ? (
-                      <a
-                        href={doc.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-accent-blue hover:underline truncate flex items-center gap-1"
-                      >
-                        {doc.title || doc.url}
-                        <ExternalLink size={10} className="flex-shrink-0 opacity-50" />
-                      </a>
-                    ) : (
-                      <span className="text-text-secondary truncate">
-                        {doc.title || doc.headline || "Untitled"}
+                .map((doc: any, i: number) => {
+                  const displayText = doc.title || doc.headline || doc.content?.slice(0, 100) || "Untitled";
+                  return (
+                    <div key={i} className="flex items-start gap-2 text-xs">
+                      <span className="text-text-muted flex-shrink-0 mt-0.5 w-16 text-right font-mono text-[10px]">
+                        {doc.source?.replace(/_/g, " ") || "unknown"}
                       </span>
-                    )}
-                  </div>
-                ))}
+                      <div className="flex-1 min-w-0">
+                        {doc.url ? (
+                          <a
+                            href={doc.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-accent-blue hover:underline flex items-center gap-1"
+                          >
+                            <span className="truncate">{displayText}</span>
+                            <ExternalLink size={10} className="flex-shrink-0 opacity-50" />
+                          </a>
+                        ) : (
+                          <span className="text-text-secondary truncate block">
+                            {displayText}
+                          </span>
+                        )}
+                        {doc.content && doc.title && (
+                          <p className="text-[10px] text-text-muted mt-0.5 line-clamp-1">
+                            {doc.content.slice(0, 120)}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
           </div>
         )}
