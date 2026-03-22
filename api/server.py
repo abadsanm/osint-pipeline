@@ -92,6 +92,10 @@ pipeline_stats = {
 
 _lock = threading.Lock()
 
+# Signal backtester (accuracy tracking)
+from stock_alpha.backtester import SignalBacktester
+_backtester = SignalBacktester()
+
 
 # ---------------------------------------------------------------------------
 # Kafka background consumers
@@ -303,6 +307,10 @@ def _consume_signals():
                         signals.append(signal_entry)
                         _evaluate_alerts(signal_entry)
 
+                elif topic == "stock.alpha.signals":
+                    # Record alpha signals for backtesting
+                    _record_alpha_for_backtest(data)
+
         except Exception as e:
             log.warning("Failed to process signal message: %s", e)
 
@@ -417,6 +425,53 @@ def _evaluate_alerts(signal_entry: dict):
         del _alert_dedup[k]
 
 
+def _record_alpha_for_backtest(data: dict):
+    """Record an alpha signal for backtesting. Called from _consume_signals."""
+    try:
+        ticker = data.get("ticker", "")
+        direction = data.get("signal_direction", "neutral")
+        signal_score = data.get("signal_score", 0.0)
+        confidence = data.get("confidence", 0.0)
+        price = data.get("price")
+        ts = data.get("timestamp", "")
+        signal_id = data.get("signal_id") or f"{ticker}_{ts}"
+
+        if not ticker or price is None:
+            # Try to fetch the current price if not in the message
+            if ticker and price is None:
+                try:
+                    df = _backtester._price_provider.get_prices(ticker)
+                    if df is not None and not df.empty:
+                        close_col = "close" if "close" in df.columns else "Close"
+                        if close_col in df.columns:
+                            price = float(df[close_col].iloc[-1])
+                except Exception:
+                    pass
+            if not ticker or price is None:
+                return
+
+        # Parse timestamp
+        if isinstance(ts, str) and ts:
+            try:
+                timestamp = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+            except ValueError:
+                timestamp = datetime.now(timezone.utc)
+        else:
+            timestamp = datetime.now(timezone.utc)
+
+        _backtester.record_signal(
+            signal_id=signal_id,
+            ticker=ticker,
+            direction=direction,
+            signal_score=signal_score,
+            confidence=confidence,
+            price_at_signal=price,
+            timestamp=timestamp,
+        )
+    except Exception as e:
+        log.warning("Failed to record alpha signal for backtest: %s", e)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -523,6 +578,27 @@ def mark_all_alerts_read():
                 a["read"] = True
                 count += 1
     return {"ok": True, "marked": count}
+
+
+# ---------------------------------------------------------------------------
+# Signal Backtesting / Accuracy Tracking
+# ---------------------------------------------------------------------------
+
+@app.get("/api/backtest")
+def get_backtest_stats(
+    cleanup_days: Optional[int] = Query(None, ge=1, le=365, description="Remove signals older than N days"),
+):
+    """Signal accuracy stats. Evaluates pending signals lazily on each request."""
+    # Optionally clean up old signals
+    if cleanup_days is not None:
+        _backtester.cleanup(max_age_days=cleanup_days)
+
+    # Evaluate any signals that have matured past their horizon
+    newly_evaluated = _backtester.evaluate_pending()
+
+    stats = _backtester.get_accuracy_stats()
+    stats["newly_evaluated"] = newly_evaluated
+    return stats
 
 
 @app.get("/api/sectors")
