@@ -31,6 +31,7 @@ class NormalizationConfig:
         "finance.seeking_alpha.articles",
         "finance.finviz.news",
         "tech.techmeme.articles",
+        "tech.newsletter.articles",
         "gov.sam.opportunities",
     ]
 
