@@ -59,9 +59,17 @@ class StockAlphaEngine:
         self._insider = InsiderScorer()
         self._macro = MacroRegimeDetector()
 
+        # ML prediction layer
+        from stock_alpha.feature_store import FeatureStore
+        from stock_alpha.ml_scorer import MLScorer
+        self._feature_store = FeatureStore()
+        self._ml_scorer = MLScorer()
+
     def setup(self):
         """Load models."""
         self._analyzer.setup()
+        if self._ml_scorer.is_trained:
+            log.info("ML scorer loaded from disk (%d features)", len(self._ml_scorer._feature_names))
         log.info("Stock Alpha Engine initialized")
 
     def process_signal(self, signal: CorrelatedSignal) -> Optional[AlphaSignal]:
@@ -138,6 +146,34 @@ class StockAlphaEngine:
             microstructure_signals=micro_signals,
             order_flow_signals=flow_signals,
         )
+
+        # 8. Snapshot features for ML training
+        try:
+            snap = self._feature_store.snapshot_from_engine(ticker, self)
+            if snap:
+                log.debug("Feature snapshot stored for %s", ticker)
+        except Exception as e:
+            log.debug("Feature snapshot failed for %s: %s", ticker, e)
+
+        # 9. ML prediction blending (if model is trained)
+        if self._ml_scorer.is_trained and alpha:
+            try:
+                snap_dict = snap.__dict__ if snap else {}
+                ml_pred = self._ml_scorer.predict(snap_dict)
+                if ml_pred:
+                    blended = self._ml_scorer.blend_with_rule_based(
+                        alpha.signal_score, ml_pred, blend_weight=0.4
+                    )
+                    alpha.signal_score = blended
+                    # Re-evaluate direction with blended score
+                    if blended > 0.15:
+                        alpha.signal_direction = "bullish"
+                    elif blended < -0.15:
+                        alpha.signal_direction = "bearish"
+                    else:
+                        alpha.signal_direction = "neutral"
+            except Exception as e:
+                log.debug("ML blending failed for %s: %s", ticker, e)
 
         return alpha
 

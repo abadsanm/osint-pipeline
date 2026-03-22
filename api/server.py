@@ -747,6 +747,96 @@ def get_backtest_stats(
 
 
 # ---------------------------------------------------------------------------
+# ML Prediction Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/ml/status")
+def ml_status():
+    """Status of the ML prediction model."""
+    try:
+        from stock_alpha.ml_scorer import MLScorer
+        from stock_alpha.feature_store import FeatureStore
+
+        scorer = MLScorer()
+        store = FeatureStore()
+        store_stats = store.get_stats()
+
+        return {
+            "model_trained": scorer.is_trained,
+            "training_stats": scorer.training_stats if scorer.is_trained else None,
+            "feature_importance": scorer.get_feature_importance()[:10] if scorer.is_trained else [],
+            "feature_store": store_stats,
+        }
+    except Exception as e:
+        return {"model_trained": False, "error": str(e), "feature_store": {}}
+
+
+@app.post("/api/ml/train")
+def ml_train():
+    """Train the ML model on available feature store data."""
+    try:
+        from stock_alpha.ml_scorer import MLScorer
+        from stock_alpha.feature_store import FeatureStore
+
+        store = FeatureStore()
+
+        # First label any unlabeled snapshots
+        labeled = store.label_with_returns()
+        log.info("Labeled %d snapshots with forward returns", labeled)
+
+        stats = store.get_stats()
+        if stats.get("labeled", 0) < 50:
+            return {
+                "status": "insufficient_data",
+                "message": f"Need at least 50 labeled samples, have {stats.get('labeled', 0)}. Keep the pipeline running to accumulate data.",
+                "feature_store": stats,
+            }
+
+        scorer = MLScorer()
+        training_result = scorer.train(store)
+
+        return {
+            "status": "trained",
+            "stats": training_result,
+            "feature_store": stats,
+        }
+    except Exception as e:
+        log.error("ML training failed: %s", e, exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+
+@app.get("/api/ml/predict/{ticker}")
+def ml_predict(ticker: str):
+    """Get ML prediction for a ticker using current features."""
+    ticker = ticker.upper().strip()
+    try:
+        from stock_alpha.ml_scorer import MLScorer
+        from stock_alpha.feature_store import FeatureStore
+
+        scorer = MLScorer()
+        if not scorer.is_trained:
+            return {"ticker": ticker, "prediction": None, "reason": "Model not trained yet"}
+
+        store = FeatureStore()
+        # Get latest snapshot for this ticker
+        data = store.get_training_data(ticker=ticker)
+        if not data:
+            return {"ticker": ticker, "prediction": None, "reason": "No feature data for this ticker"}
+
+        latest = data[-1]
+        prediction = scorer.predict(latest)
+
+        return {
+            "ticker": ticker,
+            "prediction": prediction,
+            "snapshot_time": latest.get("timestamp"),
+            "features_used": len(scorer._feature_names),
+        }
+    except Exception as e:
+        return {"ticker": ticker, "prediction": None, "reason": str(e)}
+
+
+# ---------------------------------------------------------------------------
 # Settings Endpoints
 # ---------------------------------------------------------------------------
 
