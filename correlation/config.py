@@ -24,7 +24,7 @@ class CorrelationConfig:
     WINDOW_SIZE_MINUTES = 60       # Each window spans 1 hour
     WINDOW_SLIDE_MINUTES = 5       # Evaluate every 5 minutes
     WINDOW_RETENTION_HOURS = 24    # Keep history for baseline
-    MIN_MENTIONS_TO_EMIT = 5       # Minimum mentions to emit a signal
+    MIN_MENTIONS_TO_EMIT = 2       # Minimum mentions to emit a signal
     MIN_SOURCES_FOR_STRONG = 2     # Need 2+ platforms for strong signal
 
     # Source reliability weights (0.0-1.0)
@@ -58,7 +58,7 @@ class CorrelationConfig:
     ANOMALY_TEMPLATE_FRACTION = 0.3
 
     # Anomaly confidence penalty
-    ANOMALY_PENALTY = 0.6  # Multiply confidence by this when anomalies detected
+    ANOMALY_PENALTY = 0.75  # Multiply confidence by this when anomalies detected
 
 
 def load_config_from_env():

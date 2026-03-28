@@ -205,17 +205,21 @@ class InsiderScorer:
             _classify_title(t.insider_title) == "c_suite" for t in recent
         )
 
-        # --- Weighted ratio -------------------------------------------------
+        # --- Weighted ratio with time decay -----------------------------------
+        now = datetime.now(timezone.utc)
         weighted_buy = 0.0
         weighted_sell = 0.0
         for txn in recent:
             title_class = _classify_title(txn.insider_title)
             w = _weight_for_title(title_class)
+            # Exponential time decay: half-life of 7 days
+            days_ago = (now - txn.trade_date).total_seconds() / 86400
+            time_weight = math.exp(-days_ago / 10.0)  # 10-day decay constant
             if txn.trade_type == "buy":
                 cluster_mult = 1.5 if txn.is_cluster_buy else 1.0
-                weighted_buy += txn.value * w * cluster_mult
+                weighted_buy += txn.value * w * cluster_mult * time_weight
             else:
-                weighted_sell += txn.value * w
+                weighted_sell += txn.value * w * time_weight
 
         total_weighted = weighted_buy + weighted_sell
         if total_weighted > 0:

@@ -172,7 +172,7 @@ class RuleBasedScorer:
         else:
             direction = "neutral"
 
-        # Confidence = average of component confidences
+        # Confidence from calibrator if available, otherwise conservative heuristic
         components_present = sum([
             abs(sentiment_score) > 0.01,
             svc is not None,
@@ -181,9 +181,16 @@ class RuleBasedScorer:
             micro_score is not None,
             flow_score is not None,
         ])
-        confidence = min(1.0, (correlation_confidence + abs(signal_score)) / 2)
-        if components_present < 2:
-            confidence *= 0.5  # Low confidence with few components
+
+        self._load_models()
+        if RuleBasedScorer._calibrator is not None:
+            try:
+                calibrated = RuleBasedScorer._calibrator.predict([[abs(signal_score)]])[0]
+                confidence = float(max(0.0, min(1.0, calibrated)))
+            except Exception:
+                confidence = self._heuristic_confidence(signal_score, components_present)
+        else:
+            confidence = self._heuristic_confidence(signal_score, components_present)
 
         return AlphaSignal(
             ticker=ticker,
@@ -370,6 +377,18 @@ class RuleBasedScorer:
         )
         return alpha, feature_vector
 
+    @staticmethod
+    def _heuristic_confidence(signal_score: float, components_present: int) -> float:
+        """Conservative confidence when no calibrator is trained yet.
+
+        Scales with signal strength and number of available components.
+        Deliberately conservative — better to understate than overstate.
+        """
+        base = 0.45 + (abs(signal_score) * 0.25)  # 0.45 to 0.70 range
+        agreement = components_present / 4.0        # 0.25 to 1.0
+        confidence = base * (0.5 + 0.5 * agreement) # Scale by agreement
+        return max(0.0, min(1.0, confidence))
+
     @classmethod
     def _redistribute_weights(cls, active_keys: set[str]) -> dict[str, float]:
         """Return weights for active components, redistributing missing weight."""
@@ -448,7 +467,7 @@ class RuleBasedScorer:
     def _score_technicals(
         df: Optional[pd.DataFrame],
     ) -> tuple[float, Optional[float], Optional[float], Optional[float], Optional[float]]:
-        """Derive a -1..+1 technical score from indicators.
+        """Derive a -1..+1 technical score from indicators using continuous mappings.
 
         Returns (score, rsi, macd_hist, bb_pctb, price).
         """
@@ -457,45 +476,58 @@ class RuleBasedScorer:
 
         latest = df.iloc[-1]
         signals = []
+        weights = []
 
         price = latest.get("close")
         rsi = latest.get("rsi")
         macd_hist = latest.get("macd_hist")
         bb_pctb = latest.get("bb_pctb")
 
-        # RSI signal
+        # RSI: continuous linear mapping (50 = neutral, <30 = bullish, >70 = bearish)
         if rsi is not None and not pd.isna(rsi):
-            if rsi < 30:
-                signals.append(0.5)    # Oversold → bullish
-            elif rsi > 70:
-                signals.append(-0.5)   # Overbought → bearish
-            else:
-                signals.append(0.0)
+            rsi_signal = (50.0 - rsi) / 50.0  # +1 at RSI=0, -1 at RSI=100, 0 at RSI=50
+            rsi_signal = max(-1.0, min(1.0, rsi_signal))
+            signals.append(rsi_signal)
+            weights.append(abs(rsi_signal))  # Stronger signals get more weight
 
-        # MACD histogram signal
+        # MACD histogram: already continuous
         if macd_hist is not None and not pd.isna(macd_hist):
-            # Positive histogram = bullish momentum
-            signals.append(max(-1.0, min(1.0, macd_hist * 5)))
+            macd_signal = max(-1.0, min(1.0, macd_hist * 5))
+            signals.append(macd_signal)
+            weights.append(abs(macd_signal))
 
-        # Bollinger Band %B signal
+        # Bollinger Band %B: continuous (0.5 = neutral, <0.2 = bullish, >0.8 = bearish)
         if bb_pctb is not None and not pd.isna(bb_pctb):
-            if bb_pctb < 0.2:
-                signals.append(0.3)    # Near lower band → bounce potential
-            elif bb_pctb > 0.8:
-                signals.append(-0.3)   # Near upper band → pullback risk
-            else:
-                signals.append(0.0)
+            bb_signal = (0.5 - bb_pctb) * 2.0  # +1 at bottom band, -1 at top band
+            bb_signal = max(-1.0, min(1.0, bb_signal))
+            signals.append(bb_signal)
+            weights.append(abs(bb_signal))
 
-        # SMA trend (price vs SMA20)
+        # SMA distance: proportional (not binary above/below)
         sma_20 = latest.get("sma_20")
-        if sma_20 is not None and price is not None and not pd.isna(sma_20):
-            if price > sma_20:
-                signals.append(0.2)
-            else:
-                signals.append(-0.2)
+        if sma_20 is not None and price is not None and not pd.isna(sma_20) and sma_20 > 0:
+            sma_pct = (price - sma_20) / sma_20  # % distance from SMA
+            sma_signal = max(-1.0, min(1.0, sma_pct * 10))  # Scale: 10% above = +1.0
+            signals.append(sma_signal)
+            weights.append(abs(sma_signal))
+
+        # OBV trend (if available)
+        obv = latest.get("obv")
+        obv_sma = latest.get("obv_sma")
+        if obv is not None and obv_sma is not None and not pd.isna(obv) and not pd.isna(obv_sma) and obv_sma != 0:
+            obv_signal = (obv - obv_sma) / abs(obv_sma)
+            obv_signal = max(-1.0, min(1.0, obv_signal * 5))
+            signals.append(obv_signal)
+            weights.append(abs(obv_signal) * 0.5)  # Lower weight for OBV
 
         if not signals:
             return 0.0, rsi, macd_hist, bb_pctb, price
 
-        tech_score = sum(signals) / len(signals)
+        # Weighted average: stronger signals contribute more
+        total_weight = sum(weights)
+        if total_weight > 0:
+            tech_score = sum(s * w for s, w in zip(signals, weights)) / total_weight
+        else:
+            tech_score = sum(signals) / len(signals)
+
         return max(-1.0, min(1.0, tech_score)), rsi, macd_hist, bb_pctb, price

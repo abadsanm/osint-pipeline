@@ -25,9 +25,7 @@ import time
 from datetime import datetime, timezone
 
 import aiohttp
-from confluent_kafka.admin import AdminClient
-
-from connectors.kafka_publisher import KafkaPublisher
+from connectors.kafka_publisher import KafkaPublisher, wait_for_bus
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -40,7 +38,14 @@ class AlpacaConfig:
     API_BASE = "https://data.alpaca.markets/v2"
     API_KEY: str | None = None
     API_SECRET: str | None = None
-    SYMBOLS = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META"]
+    SYMBOLS = [
+        # Core watchlist
+        "SPY", "QQQ", "AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META",
+        # Volatility
+        "VIX",
+        # Sector ETFs (for relative strength)
+        "XLK", "XLV", "XLF", "XLE", "XLI", "XLU", "XLRE",
+    ]
     TOPIC = "market.alpaca.bars"
     POLL_INTERVAL = 60
     POLL_INTERVAL_OFF_HOURS = 300
@@ -90,6 +95,9 @@ def load_config_from_env():
         AlpacaConfig.POLL_INTERVAL_OFF_HOURS = int(poll_off)
 
 
+
+    from connectors.kafka_publisher import apply_poll_multiplier
+    apply_poll_multiplier(AlpacaConfig, "POLL_INTERVAL", "POLL_INTERVAL_OFF_HOURS")
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
@@ -244,20 +252,8 @@ class AlpacaBarPoller:
 # ---------------------------------------------------------------------------
 
 async def wait_for_kafka(bootstrap_servers: str, timeout: int = 60):
-    """Block until Kafka broker is reachable."""
-    log.info("Waiting for Kafka at %s...", bootstrap_servers)
-    admin = AdminClient({"bootstrap.servers": bootstrap_servers})
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            metadata = admin.list_topics(timeout=5)
-            if metadata.topics:
-                log.info("Kafka is ready -- %d topics found", len(metadata.topics))
-                return
-        except Exception:
-            pass
-        await asyncio.sleep(2)
-    raise RuntimeError(f"Kafka not reachable at {bootstrap_servers} after {timeout}s")
+    """Block until message bus is reachable."""
+    wait_for_bus(bootstrap_servers, timeout)
 
 
 # ---------------------------------------------------------------------------

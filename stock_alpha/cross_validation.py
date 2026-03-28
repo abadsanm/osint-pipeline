@@ -47,9 +47,9 @@ except ImportError:  # pragma: no cover
 _MAX_OBSERVATIONS_PER_ENTITY = 10_000
 _DEFAULT_MAX_AGE_HOURS = 72
 
-# Sentiment classification thresholds
-_BULLISH_THRESHOLD = 0.1
-_BEARISH_THRESHOLD = -0.1
+# Sentiment classification thresholds (tighter = less data lost to neutral)
+_BULLISH_THRESHOLD = 0.05
+_BEARISH_THRESHOLD = -0.05
 
 # Category indices for Fleiss' kappa
 _CAT_BEARISH = 0

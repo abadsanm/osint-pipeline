@@ -26,31 +26,61 @@ class SentimentResult:
 
 
 class FinBERTAnalyzer:
-    """Runs FinBERT inference for financial sentiment analysis."""
+    """Runs FinBERT inference for financial sentiment analysis.
+
+    Tries ONNX Runtime via optimum for 3-5x faster CPU inference.
+    Falls back to standard PyTorch if optimum is not installed.
+    First ONNX run converts the model (~2 min), then uses the cached version.
+    """
 
     def __init__(self, model_name: str = ""):
         self._model_name = model_name or StockAlphaConfig.FINBERT_MODEL
         self._pipeline = None
+        self._using_onnx = False
 
     def setup(self):
-        """Load the FinBERT model. Takes ~10-30s on first run (downloads ~440MB)."""
-        from transformers import pipeline
+        """Load the FinBERT model. Prefers ONNX Runtime, falls back to PyTorch."""
+        from transformers import AutoTokenizer, pipeline
 
         log.info("Loading FinBERT model '%s'...", self._model_name)
-        self._pipeline = pipeline(
-            "sentiment-analysis",
-            model=self._model_name,
-            truncation=True,
-            max_length=StockAlphaConfig.MAX_TEXT_LENGTH,
-        )
-        log.info("FinBERT model loaded")
+
+        # Try ONNX Runtime first (3-5x faster on CPU)
+        try:
+            from optimum.onnxruntime import ORTModelForSequenceClassification
+
+            model = ORTModelForSequenceClassification.from_pretrained(
+                self._model_name, export=True,
+            )
+            tokenizer = AutoTokenizer.from_pretrained(self._model_name)
+            self._pipeline = pipeline(
+                "sentiment-analysis",
+                model=model,
+                tokenizer=tokenizer,
+                truncation=True,
+                max_length=256,
+            )
+            self._using_onnx = True
+            log.info("FinBERT loaded with ONNX Runtime (accelerated)")
+        except (ImportError, Exception) as e:
+            if isinstance(e, ImportError):
+                log.info("optimum not installed, using PyTorch: pip install optimum[onnxruntime]")
+            else:
+                log.warning("ONNX export failed, falling back to PyTorch: %s", e)
+
+            self._pipeline = pipeline(
+                "sentiment-analysis",
+                model=self._model_name,
+                truncation=True,
+                max_length=256,
+            )
+            log.info("FinBERT loaded with PyTorch")
 
     def analyze(self, text: str) -> SentimentResult:
         """Analyze a single text and return sentiment."""
         if not self._pipeline or not text:
             return SentimentResult(label="neutral", confidence=0.0, score=0.0)
 
-        results = self._pipeline(text[:StockAlphaConfig.MAX_TEXT_LENGTH * 4])
+        results = self._pipeline(text[:1024])
         result = results[0]
         return _to_sentiment_result(result)
 
@@ -59,8 +89,8 @@ class FinBERTAnalyzer:
         if not self._pipeline or not texts:
             return [SentimentResult(label="neutral", confidence=0.0, score=0.0)] * len(texts)
 
-        # Truncate texts
-        truncated = [t[:StockAlphaConfig.MAX_TEXT_LENGTH * 4] for t in texts]
+        # Truncate texts (use 256 * 4 chars as rough token estimate)
+        truncated = [t[:1024] for t in texts]
 
         results = self._pipeline(
             truncated,

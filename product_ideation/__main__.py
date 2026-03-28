@@ -13,9 +13,12 @@ import logging
 import signal
 import time
 
-from confluent_kafka import Consumer, KafkaError
+from connectors.kafka_publisher import KafkaPublisher, get_consumer, wait_for_bus
 
-from connectors.kafka_publisher import KafkaPublisher
+try:
+    from confluent_kafka import KafkaError
+except ImportError:
+    KafkaError = None
 from product_ideation.config import ProductIdeationConfig, load_config_from_env
 from product_ideation.engine import ProductIdeationEngine
 from schemas.signal import CorrelatedSignal
@@ -37,22 +40,8 @@ def _signal_handler(sig, frame):
 
 
 def wait_for_kafka(bootstrap_servers: str, timeout: int = 60):
-    """Block until Kafka broker is reachable."""
-    from confluent_kafka.admin import AdminClient
-
-    log.info("Waiting for Kafka at %s...", bootstrap_servers)
-    admin = AdminClient({"bootstrap.servers": bootstrap_servers})
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            metadata = admin.list_topics(timeout=5)
-            if metadata.topics:
-                log.info("Kafka is ready — %d topics found", len(metadata.topics))
-                return
-        except Exception:
-            pass
-        time.sleep(2)
-    raise RuntimeError(f"Kafka not reachable at {bootstrap_servers} after {timeout}s")
+    """Block until message bus is reachable."""
+    wait_for_bus(bootstrap_servers, timeout)
 
 
 def main():
@@ -69,7 +58,7 @@ def main():
     engine.setup()
 
     # Kafka consumer
-    consumer = Consumer({
+    consumer = get_consumer({
         "bootstrap.servers": ProductIdeationConfig.KAFKA_BOOTSTRAP,
         "group.id": ProductIdeationConfig.CONSUMER_GROUP,
         "auto.offset.reset": ProductIdeationConfig.AUTO_OFFSET_RESET,
@@ -110,7 +99,7 @@ def main():
                 consumer.commit(message=msg)
 
             elif msg is not None and msg.error():
-                if msg.error().code() != KafkaError._PARTITION_EOF:
+                if KafkaError and msg.error().code() != KafkaError._PARTITION_EOF:
                     log.error("Consumer error: %s", msg.error())
 
             # Periodic evaluation

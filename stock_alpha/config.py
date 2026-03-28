@@ -18,7 +18,7 @@ class StockAlphaConfig:
 
     # FinBERT
     FINBERT_MODEL = "ProsusAI/finbert"
-    MAX_TEXT_LENGTH = 512      # FinBERT token limit
+    MAX_TEXT_LENGTH = 256      # FinBERT token limit (256 for faster inference)
     SENTIMENT_BATCH_SIZE = 16  # Texts per inference batch
 
     # SVC (Sentiment Volume Convergence)

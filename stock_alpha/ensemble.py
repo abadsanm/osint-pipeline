@@ -89,8 +89,8 @@ def ensemble_predict(
         ret = prophet_forecast.get("predicted_return", 0)
         conf = prophet_forecast.get("confidence", 0.5)
         direction = "bullish" if ret > 0.1 else "bearish" if ret < -0.1 else "neutral"
-        # Convert return to -1..+1 score
-        score = max(-1, min(1, ret / 5))  # 5% return = score of 1.0
+        # Smooth saturation: tanh maps small returns proportionally, large returns saturate
+        score = math.tanh(ret / 5)
         votes.append(ModelVote("prophet", direction, score, conf))
 
     # 4. LSTM (if available)
@@ -98,7 +98,7 @@ def ensemble_predict(
         ret = lstm_forecast.get("predicted_return", 0)
         conf = lstm_forecast.get("confidence", 0.5)
         direction = "bullish" if ret > 0.1 else "bearish" if ret < -0.1 else "neutral"
-        score = max(-1, min(1, ret / 5))
+        score = math.tanh(ret / 5)
         votes.append(ModelVote("lstm", direction, score, conf))
 
     # Get per-model weights based on accuracy for this regime
@@ -119,28 +119,31 @@ def ensemble_predict(
         for v in votes
     ) / total_weight
 
-    # Count agreement
+    # Confidence-weighted agreement (not just majority vote)
+    bullish_weight = sum(v.confidence * weights.get(v.model_name, _DEFAULT_WEIGHT) for v in votes if v.direction == "bullish")
+    bearish_weight = sum(v.confidence * weights.get(v.model_name, _DEFAULT_WEIGHT) for v in votes if v.direction == "bearish")
+    neutral_weight = sum(v.confidence * weights.get(v.model_name, _DEFAULT_WEIGHT) for v in votes if v.direction == "neutral")
+
     directions = [v.direction for v in votes]
     bullish_count = directions.count("bullish")
     bearish_count = directions.count("bearish")
-    neutral_count = directions.count("neutral")
 
-    # Determine majority direction
-    if bullish_count > bearish_count and bullish_count > neutral_count:
+    # Use weighted direction, not pure count
+    if bullish_weight > bearish_weight and bullish_weight > neutral_weight:
         final_direction = "bullish"
         agreement_count = bullish_count
-    elif bearish_count > bullish_count and bearish_count > neutral_count:
+    elif bearish_weight > bullish_weight and bearish_weight > neutral_weight:
         final_direction = "bearish"
         agreement_count = bearish_count
     else:
         final_direction = "neutral"
-        agreement_count = max(bullish_count, bearish_count, neutral_count)
+        agreement_count = max(bullish_count, bearish_count, directions.count("neutral"))
 
-    # If strong disagreement (models split evenly), force neutral with low confidence
+    # If strong disagreement (models split evenly), force neutral with reduced confidence
     n_models = len(votes)
     if n_models >= 3 and agreement_count <= n_models / 2:
         final_direction = "neutral"
-        weighted_confidence *= 0.5
+        weighted_confidence = max(0.15, weighted_confidence - 0.2)  # Additive penalty, not multiplicative
 
     # Apply agreement factor
     agreement_factor = _AGREEMENT_FACTORS.get(agreement_count, 0.5)

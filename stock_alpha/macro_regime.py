@@ -37,9 +37,16 @@ REGIME_SCORES: dict[str, float] = {
     "stagflation": -0.9,
 }
 
-# Thresholds used to classify indicator direction.
-# A percentage-point move larger than this over ~3 months counts as a move.
-_DIRECTION_THRESHOLD = 0.15  # 15 bps for rate-like series
+# Thresholds per indicator (different series have different scales)
+_DIRECTION_THRESHOLDS = {
+    "T10Y2Y": 0.15,      # yield curve spread (bps)
+    "FEDFUNDS": 0.15,     # fed funds rate (bps)
+    "DGS10": 0.20,        # 10yr treasury (bps)
+    "UNRATE": 0.3,        # unemployment rate (pct pts)
+    "CPIAUCSL": 1.0,      # CPI YoY can move 100+ bps in 3 months
+    "UMCSENT": 3.0,        # consumer sentiment index (points)
+}
+_DIRECTION_THRESHOLD = 0.15  # default fallback
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +188,8 @@ class MacroRegimeDetector:
             return "stable"
 
         diff = latest.value - prior.value
-        if abs(diff) <= _DIRECTION_THRESHOLD:
+        threshold = _DIRECTION_THRESHOLDS.get(series_id, _DIRECTION_THRESHOLD)
+        if abs(diff) <= threshold:
             return "stable"
         return "rising" if diff > 0 else "falling"
 

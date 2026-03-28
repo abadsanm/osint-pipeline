@@ -14,14 +14,19 @@ from __future__ import annotations
 import json
 import logging
 import signal
+import sqlite3
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
-from confluent_kafka import Consumer, KafkaError
+from connectors.kafka_publisher import KafkaPublisher, get_consumer, wait_for_bus
 
-from connectors.kafka_publisher import KafkaPublisher
+try:
+    from confluent_kafka import KafkaError
+except ImportError:
+    KafkaError = None
 from schemas.prediction import Prediction
 from stock_alpha.technicals import PriceDataProvider
 
@@ -204,22 +209,70 @@ class PredictionTracker:
         }
 
 
+class PredictionDB:
+    """SQLite persistence for evaluated predictions."""
+
+    def __init__(self, db_path: str | None = None):
+        if db_path is None:
+            db_path = str(Path(__file__).resolve().parent / "data" / "predictions.db")
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS predictions (
+                prediction_id TEXT PRIMARY KEY,
+                ticker TEXT,
+                direction TEXT,
+                confidence REAL,
+                raw_score REAL,
+                time_horizon_hours INTEGER,
+                regime TEXT,
+                model_version TEXT,
+                created_at TEXT,
+                outcome TEXT,
+                actual_return REAL,
+                evaluated_at TEXT,
+                contributing_signals TEXT
+            )
+        """)
+        self._conn.commit()
+
+    def persist(self, pred: Prediction):
+        """Insert or update an evaluated prediction."""
+        signals_json = json.dumps(
+            [s.model_dump() if hasattr(s, "model_dump") else s for s in (pred.contributing_signals or [])]
+        )
+        self._conn.execute("""
+            INSERT OR REPLACE INTO predictions
+            (prediction_id, ticker, direction, confidence, raw_score, time_horizon_hours,
+             regime, model_version, created_at, outcome, actual_return, evaluated_at, contributing_signals)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            pred.prediction_id, pred.ticker, pred.direction, pred.confidence,
+            pred.raw_score, pred.time_horizon_hours, pred.regime,
+            pred.model_version, pred.created_at.isoformat() if pred.created_at else None,
+            pred.outcome, pred.actual_return,
+            pred.evaluated_at.isoformat() if pred.evaluated_at else None,
+            signals_json,
+        ))
+        self._conn.commit()
+
+    def get_all(self, min_confidence: float = 0.0) -> list[dict]:
+        """Fetch all predictions, optionally filtered by minimum confidence."""
+        cursor = self._conn.execute(
+            "SELECT * FROM predictions WHERE confidence >= ? ORDER BY created_at DESC",
+            (min_confidence,),
+        )
+        cols = [desc[0] for desc in cursor.description]
+        return [dict(zip(cols, row)) for row in cursor.fetchall()]
+
+    def count(self) -> int:
+        return self._conn.execute("SELECT COUNT(*) FROM predictions").fetchone()[0]
+
+
 def wait_for_kafka(bootstrap_servers: str, timeout: int = 60):
-    """Block until Kafka broker is reachable."""
-    from confluent_kafka.admin import AdminClient
-    log.info("Waiting for Kafka at %s...", bootstrap_servers)
-    admin = AdminClient({"bootstrap.servers": bootstrap_servers})
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            metadata = admin.list_topics(timeout=5)
-            if metadata.topics:
-                log.info("Kafka is ready — %d topics found", len(metadata.topics))
-                return
-        except Exception:
-            pass
-        time.sleep(2)
-    raise RuntimeError(f"Kafka not reachable after {timeout}s")
+    """Block until message bus is reachable."""
+    wait_for_bus(bootstrap_servers, timeout)
 
 
 def main():
@@ -234,7 +287,7 @@ def main():
     bootstrap = StockAlphaConfig.KAFKA_BOOTSTRAP
     wait_for_kafka(bootstrap)
 
-    consumer = Consumer({
+    consumer = get_consumer({
         "bootstrap.servers": bootstrap,
         "group.id": "prediction-tracker",
         "auto.offset.reset": "earliest",
@@ -244,6 +297,7 @@ def main():
 
     publisher = KafkaPublisher(bootstrap, client_id="prediction-tracker")
     tracker = PredictionTracker()
+    pred_db = PredictionDB()
 
     log.info("=" * 60)
     log.info("Prediction Tracker running")
@@ -271,12 +325,50 @@ def main():
                         tracker.ingest(pred)
                 except Exception as e:
                     log.debug("Failed to parse prediction: %s", e)
-            elif msg is not None and msg.error() and msg.error().code() != KafkaError._PARTITION_EOF:
+            elif msg is not None and msg.error() and KafkaError and msg.error().code() != KafkaError._PARTITION_EOF:
                 log.error("Consumer error: %s", msg.error())
 
             # Evaluate expired predictions every 60 seconds
             now = time.time()
             if now - last_eval >= 60:
+                # Also ingest pending predictions from SQLite (API-generated)
+                try:
+                    pending_db = pred_db.get_all(min_confidence=0.0)
+                    for row in pending_db:
+                        if row.get("outcome") is None and row.get("prediction_id") not in tracker._pending:
+                            try:
+                                created = row.get("created_at", "")
+                                horizon = row.get("time_horizon_hours", 24)
+                                # Compute expires_at from created_at + horizon
+                                from dateutil.parser import isoparse
+                                try:
+                                    created_dt = isoparse(created) if created else datetime.now(timezone.utc)
+                                except Exception:
+                                    created_dt = datetime.now(timezone.utc)
+                                expires_dt = created_dt + timedelta(hours=horizon)
+                                pred = Prediction.model_validate({
+                                    "prediction_id": row["prediction_id"],
+                                    "ticker": row["ticker"],
+                                    "direction": row["direction"],
+                                    "confidence": row["confidence"],
+                                    "raw_score": row.get("raw_score", 0),
+                                    "time_horizon_hours": horizon,
+                                    "decay_rate": 24.0,
+                                    "regime": row.get("regime", "unknown"),
+                                    "contributing_signals": json.loads(row.get("contributing_signals", "[]")),
+                                    "model_version": row.get("model_version", "unknown"),
+                                    "created_at": created,
+                                    "expires_at": expires_dt.isoformat(),
+                                })
+                                tracker.ingest(pred)
+                            except Exception:
+                                pass
+                    if pending_db:
+                        log.debug("Loaded %d predictions from SQLite (%d pending in tracker)",
+                                  len(pending_db), len(tracker._pending))
+                except Exception as e:
+                    log.debug("SQLite ingest error: %s", e)
+
                 evaluated = tracker.evaluate_expired()
                 for pred in evaluated:
                     publisher.publish(
@@ -284,10 +376,14 @@ def main():
                         pred.to_kafka_key(),
                         pred.to_kafka_value(),
                     )
+                    try:
+                        pred_db.persist(pred)
+                    except Exception as e:
+                        log.debug("Failed to persist prediction to SQLite: %s", e)
                 last_eval = now
 
                 if evaluated:
-                    log.info("Evaluated %d predictions", len(evaluated))
+                    log.info("Evaluated %d predictions (%d in DB)", len(evaluated), pred_db.count())
 
             # Log stats every 5 minutes
             if now - last_log >= 300:

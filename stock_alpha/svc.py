@@ -89,11 +89,13 @@ class SVCComputer:
         recent_volume = sum(p.mention_count for p in recent) / len(recent)
         prior_volume = sum(p.mention_count for p in prior) / len(prior)
 
-        # Volume change (% change, handle zero)
-        if prior_volume > 0:
+        # Volume change (% change, handle zero — require minimum baseline)
+        if prior_volume >= 2.0:
             volume_change = (recent_volume - prior_volume) / prior_volume
+        elif recent_volume > prior_volume and recent_volume >= 3.0:
+            volume_change = 0.5  # Conservative signal for new tickers
         else:
-            volume_change = 1.0 if recent_volume > 0 else 0.0
+            volume_change = 0.0  # Not enough baseline to measure change
 
         # SVC = sentiment_shift * volume_change
         svc_value = sentiment_shift * volume_change

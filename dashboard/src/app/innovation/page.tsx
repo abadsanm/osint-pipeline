@@ -211,7 +211,7 @@ function GapMapTooltip({ active, payload }: any) {
 
 function renderScatterLabel(props: any) {
   const { cx, cy, payload } = props;
-  if (!payload?.feature) return null;
+  if (!payload?.feature) return <text />;
   return (
     <text
       x={cx}
@@ -233,10 +233,10 @@ function renderScatterLabel(props: any) {
 function TrendIndicator({ trend }: { trend?: string }) {
   if (!trend) return null;
   if (trend === "worsening")
-    return <TrendingUp size={12} className="text-bearish inline-block ml-1" title="Worsening" />;
+    return <span title="Worsening"><TrendingUp size={12} className="text-bearish inline-block ml-1" /></span>;
   if (trend === "improving")
-    return <TrendingDown size={12} className="text-bullish inline-block ml-1" title="Improving" />;
-  return <Minus size={12} className="text-text-muted inline-block ml-1" title="Stable" />;
+    return <span title="Improving"><TrendingDown size={12} className="text-bullish inline-block ml-1" /></span>;
+  return <span title="Stable"><Minus size={12} className="text-text-muted inline-block ml-1" /></span>;
 }
 
 /* ─── Opportunity Score Badge ─── */
@@ -299,6 +299,40 @@ export default function InnovationPage() {
   );
 
   const recentItems = data.recent_insights.slice(0, 10);
+
+  // Fetch AI analysis for recent insights on load
+  const [insightAnalyses, setInsightAnalyses] = useState<Record<string, string>>({});
+  const [analyzingInsight, setAnalyzingInsight] = useState<string | null>(null);
+
+  const analyzeInsight = useCallback(async (insight: RecentInsight, idx: number) => {
+    const key = `${insight.title}-${idx}`;
+    if (insightAnalyses[key]) return; // already analyzed
+    setAnalyzingInsight(key);
+    try {
+      const res = await fetch(`${API_BASE}/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entity_id: insight.title,
+          label: insight.title,
+          context_type: "entity",
+          sentiment: 0.5,
+          volume: 1,
+          sources: { [insight.source]: 1 },
+          keywords: insight.content.split(/\s+/).slice(0, 10),
+          sampleDocs: [{ title: insight.title, content: insight.content, source: insight.source }],
+        }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        setInsightAnalyses((prev) => ({ ...prev, [key]: result.analysis || "No analysis available." }));
+      }
+    } catch {
+      setInsightAnalyses((prev) => ({ ...prev, [key]: "Analysis unavailable — API error." }));
+    } finally {
+      setAnalyzingInsight(null);
+    }
+  }, [insightAnalyses]);
 
   const topOpportunities = useMemo(() => {
     return [...data.gap_map]
@@ -670,9 +704,12 @@ export default function InnovationPage() {
         {/* ── Competitive Landscape ── */}
         {data.competitive_landscape && data.competitive_landscape.length > 0 && (
           <div className="bg-surface border border-border rounded-card p-card-padding-lg">
-            <h3 className="text-sm font-semibold text-text-secondary mb-4">
-              Competitive Landscape
-            </h3>
+            <div className="flex items-center gap-1.5 mb-4">
+              <h3 className="text-sm font-semibold text-text-secondary">Competitive Landscape</h3>
+              <InfoTooltip title="Competitive Landscape">
+                <p>Entities that are frequently mentioned together across sources, indicating competitive relationships. Shared mentions count how often both entities appear in the same documents. Use this to identify market positioning, competitive threats, and partnership opportunities detected by cross-correlation.</p>
+              </InfoTooltip>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {data.competitive_landscape.map((entry) => (
                 <div
@@ -756,47 +793,75 @@ export default function InnovationPage() {
               No recent insights
             </div>
           ) : (
-            <div className="max-h-[400px] overflow-y-auto space-y-1 pr-1">
+            <div className="max-h-[500px] overflow-y-auto space-y-1 pr-1">
               {recentItems.map((insight, idx) => {
                 const sc = getSourceColor(insight.source);
+                const analysisKey = `${insight.title}-${idx}`;
+                const analysis = insightAnalyses[analysisKey];
+                const isAnalyzing = analyzingInsight === analysisKey;
                 return (
                   <div
-                    key={`${insight.title}-${idx}`}
-                    className="flex items-start gap-3 px-3 py-2.5 rounded-md hover:bg-surface-alt/50 transition-colors group"
+                    key={analysisKey}
+                    className="px-3 py-2.5 rounded-md hover:bg-surface-alt/50 transition-colors group"
                   >
-                    {/* Source badge */}
-                    <span
-                      className={`flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide ${sc.bg} ${sc.text}`}
-                    >
-                      {insight.source.replace(/_/g, " ")}
-                    </span>
+                    <div className="flex items-start gap-3">
+                      {/* Source badge */}
+                      <span
+                        className={`flex-shrink-0 px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide ${sc.bg} ${sc.text}`}
+                      >
+                        {insight.source.replace(/_/g, " ")}
+                      </span>
 
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-xs font-medium text-text-primary truncate">
-                          {insight.title}
+                      {/* Content */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs font-medium text-text-primary truncate">
+                            {insight.title}
+                          </p>
+                          {insight.url && (
+                            <a
+                              href={insight.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex-shrink-0 text-text-muted hover:text-accent-blue transition-colors opacity-0 group-hover:opacity-100"
+                            >
+                              <ExternalLink size={12} />
+                            </a>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-text-muted mt-0.5 line-clamp-2">
+                          {insight.content}
                         </p>
-                        {insight.url && (
-                          <a
-                            href={insight.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex-shrink-0 text-text-muted hover:text-accent-blue transition-colors opacity-0 group-hover:opacity-100"
-                          >
-                            <ExternalLink size={12} />
-                          </a>
-                        )}
                       </div>
-                      <p className="text-[11px] text-text-muted mt-0.5 line-clamp-2">
-                        {insight.content}
-                      </p>
+
+                      {/* Analyze button + Timestamp */}
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <button
+                          onClick={() => analyzeInsight(insight, idx)}
+                          disabled={isAnalyzing || !!analysis}
+                          className={`p-1 rounded transition-colors ${
+                            analysis
+                              ? "text-bullish"
+                              : isAnalyzing
+                              ? "text-accent-blue animate-pulse"
+                              : "text-text-muted hover:text-accent-blue hover:bg-surface-alt"
+                          }`}
+                          title={analysis ? "Analysis complete" : "Analyze with Sentinel AI"}
+                        >
+                          <Brain size={13} />
+                        </button>
+                        <span className="text-[10px] font-mono text-text-muted">
+                          {timeAgo(insight.created_at)}
+                        </span>
+                      </div>
                     </div>
 
-                    {/* Timestamp */}
-                    <span className="flex-shrink-0 text-[10px] font-mono text-text-muted">
-                      {timeAgo(insight.created_at)}
-                    </span>
+                    {/* Expanded AI analysis */}
+                    {analysis && (
+                      <div className="mt-2 ml-[72px] p-2.5 rounded-md bg-surface-alt/60 border border-border/50 text-[11px] text-text-secondary leading-relaxed whitespace-pre-wrap">
+                        {analysis}
+                      </div>
+                    )}
                   </div>
                 );
               })}

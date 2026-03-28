@@ -245,7 +245,7 @@ def _prophet_predict(
 
         # Confidence: narrower CI relative to price = higher confidence
         ci_width = yhat_upper - yhat_lower
-        confidence = max(0.0, min(1.0, 1.0 - (ci_width / current_price * 10)))
+        confidence = max(0.0, min(1.0, 1.0 / (1.0 + ci_width / current_price)))
 
         results.append(
             ForecastResult(
@@ -450,7 +450,7 @@ def _forecast_lstm(
 
             # Scale by sqrt(horizon) for multi-day (random walk assumption)
             h_factor = np.sqrt(h)
-            scaled_mean = mean_return * h
+            scaled_mean = mean_return * h_factor
             scaled_std = std_return * h_factor
 
             # Convert to percentage
@@ -461,7 +461,7 @@ def _forecast_lstm(
             ci_upper = (scaled_mean + 1.96 * scaled_std) * 100
 
             # Confidence: lower std = higher confidence
-            confidence = max(0.0, min(1.0, 1.0 - scaled_std * 10))
+            confidence = max(0.0, min(1.0, 1.0 / (1.0 + scaled_std * 5)))
 
             results.append(
                 ForecastResult(

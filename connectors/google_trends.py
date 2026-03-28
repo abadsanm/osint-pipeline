@@ -29,9 +29,7 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from confluent_kafka.admin import AdminClient
-
-from connectors.kafka_publisher import KafkaPublisher
+from connectors.kafka_publisher import KafkaPublisher, wait_for_bus
 from schemas.document import (
     ContentType,
     OsintDocument,
@@ -515,20 +513,8 @@ class GoogleTrendsConnector:
 # ---------------------------------------------------------------------------
 
 def wait_for_kafka(bootstrap_servers: str, timeout: int = 60):
-    """Block until Kafka broker is reachable."""
-    log.info("Waiting for Kafka at %s...", bootstrap_servers)
-    admin = AdminClient({"bootstrap.servers": bootstrap_servers})
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            metadata = admin.list_topics(timeout=5)
-            if metadata.topics:
-                log.info("Kafka is ready — %d topics found", len(metadata.topics))
-                return
-        except Exception:
-            pass
-        time.sleep(2)
-    raise RuntimeError(f"Kafka not reachable at {bootstrap_servers} after {timeout}s")
+    """Block until message bus is reachable."""
+    wait_for_bus(bootstrap_servers, timeout)
 
 
 def load_config_from_env():
@@ -558,6 +544,9 @@ def load_config_from_env():
     bootstrap = os.environ.get("KAFKA_BOOTSTRAP")
     if bootstrap:
         GoogleTrendsConfig.KAFKA_BOOTSTRAP = bootstrap
+
+    from connectors.kafka_publisher import apply_poll_multiplier
+    apply_poll_multiplier(GoogleTrendsConfig, "INTEREST_POLL_INTERVAL", "TRENDING_POLL_INTERVAL", "RELATED_POLL_INTERVAL")
 
 
 async def async_main():

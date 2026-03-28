@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import math
-from collections import defaultdict, deque
+from collections import defaultdict, deque, OrderedDict
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -46,11 +46,16 @@ _MAX_DEPTH = 100
 class StockAlphaEngine:
     """Processes correlated signals into scored alpha signals."""
 
+    MAX_DOC_CACHE = 10000
+
     def __init__(self):
         self._analyzer = FinBERTAnalyzer()
         self._svc = SVCComputer()
         self._prices = PriceDataProvider()
         self._scorer = RuleBasedScorer()
+
+        # Document text cache for real FinBERT sentiment (doc_id -> {title, content_text})
+        self._doc_cache: OrderedDict[str, dict] = OrderedDict()
 
         # Market data caches (symbol -> deque of recent data)
         self._bars: dict[str, deque[MarketBar]] = defaultdict(lambda: deque(maxlen=_MAX_BARS))
@@ -77,6 +82,12 @@ class StockAlphaEngine:
         if self._ml_scorer.is_trained:
             log.info("ML scorer loaded from disk (%d features)", len(self._ml_scorer._feature_names))
         log.info("Stock Alpha Engine initialized")
+
+    def cache_document(self, doc_id: str, title: str, content_text: str):
+        """Cache a normalized document for later sentiment lookup."""
+        if len(self._doc_cache) >= self.MAX_DOC_CACHE:
+            self._doc_cache.popitem(last=False)  # Remove oldest
+        self._doc_cache[doc_id] = {"title": title or "", "content_text": content_text or ""}
 
     def process_signal(self, signal: CorrelatedSignal) -> Optional[AlphaSignal]:
         """Process a single correlated signal into an alpha signal."""
@@ -155,7 +166,7 @@ class StockAlphaEngine:
 
         # 8. Snapshot features for ML training
         try:
-            snap = self._feature_store.snapshot_from_engine(ticker, self)
+            snap = self._feature_store.snapshot_from_engine(ticker, self, signal=signal)
             if snap:
                 log.debug("Feature snapshot stored for %s", ticker)
         except Exception as e:
@@ -372,24 +383,39 @@ class StockAlphaEngine:
         return signals if signals else None
 
     def _analyze_sentiment(self, signal: CorrelatedSignal) -> float:
-        """Run FinBERT on the signal's entity text and title."""
-        # Build texts from the signal context
+        """Run FinBERT on actual document text from cached documents."""
         texts = []
 
-        # Use the signal title as the primary text
-        title = f"{signal.entity_text}: {signal.signal_type.value}"
-        texts.append(title)
+        # Look up original document text from cache
+        for doc_id in signal.contributing_doc_ids:
+            doc = self._doc_cache.get(doc_id)
+            if doc:
+                # Use title first (most concentrated sentiment), then first 512 chars of content
+                if doc["title"]:
+                    texts.append(doc["title"])
+                if doc["content_text"]:
+                    texts.append(doc["content_text"][:512])
 
-        # Add a summary of source contributions
-        for source, contrib in signal.source_breakdown.items():
-            texts.append(
-                f"{signal.entity_text} mentioned {contrib.mention_count} times on {source}"
-            )
-
+        # Fallback if no cached docs found
         if not texts:
+            log.warning("No cached docs for signal %s (%s) — %d doc_ids missed cache",
+                        signal.entity_text, signal.signal_id, len(signal.contributing_doc_ids))
+            # Use entity text as minimal fallback — better than metadata strings
+            texts.append(f"{signal.entity_text} stock market analysis")
+
+        # Deduplicate and limit batch size
+        seen: set[str] = set()
+        unique_texts = []
+        for t in texts:
+            if t not in seen and len(t.strip()) > 10:
+                seen.add(t)
+                unique_texts.append(t)
+        unique_texts = unique_texts[:16]  # Max 16 texts per signal
+
+        if not unique_texts:
             return 0.0
 
-        results = self._analyzer.analyze_batch(texts)
+        results = self._analyzer.analyze_batch(unique_texts)
         agg = aggregate_sentiment(results)
         return agg["avg_score"]
 

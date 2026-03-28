@@ -18,9 +18,7 @@ from typing import Optional
 from xml.etree import ElementTree
 
 import aiohttp
-from confluent_kafka.admin import AdminClient
-
-from connectors.kafka_publisher import KafkaPublisher
+from connectors.kafka_publisher import KafkaPublisher, wait_for_bus
 from schemas.document import (
     ContentType,
     OsintDocument,
@@ -203,17 +201,8 @@ class TechCrunchConnector:
 
 
 async def wait_for_kafka(bootstrap_servers: str, timeout: int = 60):
-    admin = AdminClient({"bootstrap.servers": bootstrap_servers})
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            metadata = admin.list_topics(timeout=5)
-            if metadata.topics:
-                return
-        except Exception:
-            pass
-        await asyncio.sleep(2)
-    raise RuntimeError(f"Kafka not reachable after {timeout}s")
+    """Block until message bus is reachable."""
+    wait_for_bus(bootstrap_servers, timeout)
 
 
 def load_config_from_env():
@@ -236,6 +225,9 @@ def load_config_from_env():
     poll = os.environ.get("TECHCRUNCH_POLL_INTERVAL")
     if poll:
         TechCrunchConfig.POLL_INTERVAL = int(poll)
+
+    from connectors.kafka_publisher import apply_poll_multiplier
+    apply_poll_multiplier(TechCrunchConfig, "POLL_INTERVAL")
 
 
 async def main():

@@ -500,11 +500,23 @@ class FeatureStore:
         self._store(snap)
         return snap
 
-    def snapshot_from_engine(self, ticker: str, engine) -> Optional[FeatureSnapshot]:
+    def snapshot_from_engine(
+        self, ticker: str, engine, signal=None,
+    ) -> Optional[FeatureSnapshot]:
         """Extract a full feature snapshot from a StockAlphaEngine instance.
 
-        Reads all cached data from the engine for this ticker.  Returns
-        ``None`` if no price data is available.
+        Parameters
+        ----------
+        ticker : str
+            Stock ticker symbol.
+        engine : StockAlphaEngine
+            The engine instance to pull cached data from.
+        signal : CorrelatedSignal, optional
+            The correlated signal being processed.  When provided,
+            ``source_count`` and ``correlation_confidence`` are read
+            directly from the signal.
+
+        Returns ``None`` if no price data is available.
         """
         import pandas as pd
 
@@ -565,7 +577,6 @@ class FeatureStore:
         # 2. Sentiment velocity
         sent_vel = None
         sent_acc = None
-        sent_score_from_vel = None
         try:
             velocity = engine._velocity.compute(ticker)
             if velocity:
@@ -574,12 +585,16 @@ class FeatureStore:
         except Exception:
             pass
 
-        # 3. SVC
+        # 3. SVC (also provides sentiment_avg for the sentiment_score feature)
         svc_val = None
+        svc_sentiment_avg = None
+        svc_mention_total = None
         try:
             svc_result = engine._svc.compute(ticker)
             if svc_result:
                 svc_val = svc_result.svc_value
+                svc_sentiment_avg = svc_result.sentiment_avg
+                svc_mention_total = int(svc_result.volume_avg * svc_result.data_points)
         except Exception:
             pass
 
@@ -667,11 +682,13 @@ class FeatureStore:
             sma50_distance_pct=sma50_dist,
             atr_pct=atr_pct,
             obv_slope=obv_slope,
-            sentiment_score=sent_score_from_vel,
+            sentiment_score=svc_sentiment_avg,
             sentiment_velocity=sent_vel,
             sentiment_acceleration=sent_acc,
-            mention_volume=None,
-            source_count=None,
+            mention_volume=svc_mention_total if svc_mention_total else (
+                signal.total_mentions if signal else None
+            ),
+            source_count=signal.unique_sources if signal else None,
             svc_value=svc_val,
             vwap_distance_pct=vwap_dist,
             fvg_bias=fvg_bias_val,
@@ -680,7 +697,7 @@ class FeatureStore:
             imbalance_ratio=imbalance,
             insider_score=insider_val,
             macro_regime_score=macro_val,
-            correlation_confidence=None,
+            correlation_confidence=signal.confidence_score if signal else None,
             # New features
             sentiment_dispersion=sent_dispersion,
             hour_sin=hour_sin,

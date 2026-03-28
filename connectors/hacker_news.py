@@ -27,9 +27,7 @@ from html import unescape
 from typing import Optional
 
 import aiohttp
-from confluent_kafka.admin import AdminClient
-
-from connectors.kafka_publisher import KafkaPublisher
+from connectors.kafka_publisher import KafkaPublisher, wait_for_bus
 from schemas.document import (
     ContentType,
     OsintDocument,
@@ -398,23 +396,15 @@ class AlgoliaKeywordMonitor:
 # ---------------------------------------------------------------------------
 
 async def wait_for_kafka(bootstrap_servers: str, timeout: int = 60):
-    """Block until Kafka broker is reachable."""
-    log.info("Waiting for Kafka at %s...", bootstrap_servers)
-    admin = AdminClient({"bootstrap.servers": bootstrap_servers})
-    start = time.time()
-    while time.time() - start < timeout:
-        try:
-            metadata = admin.list_topics(timeout=5)
-            if metadata.topics:
-                log.info("Kafka is ready — %d topics found", len(metadata.topics))
-                return
-        except Exception:
-            pass
-        await asyncio.sleep(2)
-    raise RuntimeError(f"Kafka not reachable at {bootstrap_servers} after {timeout}s")
+    """Block until message bus is reachable."""
+    wait_for_bus(bootstrap_servers, timeout)
 
 
 async def main():
+    # Apply poll multiplier for laptop/low-resource mode
+    from connectors.kafka_publisher import apply_poll_multiplier
+    apply_poll_multiplier(HNConfig, "STORIES_POLL_INTERVAL", "ALGOLIA_POLL_INTERVAL")
+
     # Wait for Kafka to be available
     await wait_for_kafka(HNConfig.KAFKA_BOOTSTRAP)
 

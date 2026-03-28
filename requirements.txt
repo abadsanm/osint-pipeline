@@ -24,6 +24,7 @@ pytrends>=4.9.2
 # Stock Alpha Engine
 transformers>=4.36.0
 torch>=2.1.0
+optimum[onnxruntime]>=1.16.0
 yfinance>=0.2.31
 pandas-ta>=0.3.14b
 lightgbm>=4.1.0

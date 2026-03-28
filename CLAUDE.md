@@ -166,7 +166,8 @@ cd dashboard && npm install && npm run dev  # http://localhost:3000
 | `TRUSTPILOT_DOMAINS` | For trustpilot | Domains to monitor |
 | `TRUSTPILOT_API_KEY` | Optional | Enables API mode |
 | `GITHUB_TOKEN(S)` | Optional | PAT(s) for rate limits |
-| `FINNHUB_API_KEY` | Optional | Congressional trades + market news |
+| `FINNHUB_API_KEY` | Configured | Congressional trades + market news |
+| `EARNINGS_WATCHLIST` | Optional | Override tickers for earnings calendar |
 | `CONGRESS_WATCHLIST` | Optional | Tickers for congressional trade monitoring |
 | `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` | Optional | OAuth mode |
 | `REDDIT_SUBREDDITS` | Optional | Override default subreddit list |
@@ -184,11 +185,12 @@ cd dashboard && npm install && npm run dev  # http://localhost:3000
 | `BINANCE_SYMBOLS` | Optional | Override crypto symbols |
 | `ALPACA_API_KEY` / `ALPACA_API_SECRET` | **Required for Alpaca** | Market data API credentials |
 | `ALPACA_SYMBOLS` | Optional | Override equity symbols |
+| `POLL_INTERVAL_MULTIPLIER` | No (default: 1.0) | Multiply all connector poll intervals (e.g. 5.0 = poll 5x less often) |
+| `MESSAGE_BUS` | No (default: sqlite) | Message bus backend: `sqlite` (no Docker) or `kafka` (requires Docker) |
 
 ## Known Issues
 
 - `docker-compose.yml` init-topics needs longer wait-for-kafka
-- `docker-compose.yml` deprecated `version` attribute — remove it
 - `wait_for_kafka()` duplicated across subsystems — extract to shared utility
 - Dashboard `npm run build` prerender warnings (dev server works fine)
 - `stock_alpha/__main__.py` signal.signal() crashes on Windows — use try/except on asyncio.gather

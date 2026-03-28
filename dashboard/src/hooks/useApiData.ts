@@ -122,3 +122,7 @@ export function useBacktestResults() {
 export function usePredictionOutcomes(limit = 50) {
   return useApiData(`/predictions/outcomes?limit=${limit}`, [], 5000);
 }
+
+export function useLiveBacktestResults(minConfidence = 50) {
+  return useApiData(`/backtesting/live?min_confidence=${minConfidence / 100}`, { status: "loading" }, 30000);
+}

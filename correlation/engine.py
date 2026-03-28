@@ -65,7 +65,12 @@ class CrossCorrelationEngine:
         for key in self._store.get_all_entity_keys():
             window = self._store.get_window(key, window_end=now)
 
-            if window.total_mentions < CorrelationConfig.MIN_MENTIONS_TO_EMIT:
+            # Bypass mention minimum for high-authority sources (weight >= 0.9)
+            high_authority = any(
+                CorrelationConfig.SOURCE_WEIGHTS.get(src, 0) >= 0.9
+                for src in window.unique_sources
+            )
+            if window.total_mentions < CorrelationConfig.MIN_MENTIONS_TO_EMIT and not high_authority:
                 continue
 
             signal = self._evaluate_single(key, window, now)

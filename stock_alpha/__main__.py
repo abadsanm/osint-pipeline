@@ -12,11 +12,15 @@ Usage:
 import json
 import logging
 import signal
+import threading
 import time
 
-from confluent_kafka import Consumer, KafkaError
+from connectors.kafka_publisher import KafkaPublisher, get_consumer, wait_for_bus
 
-from connectors.kafka_publisher import KafkaPublisher
+try:
+    from confluent_kafka import KafkaError
+except ImportError:
+    KafkaError = None
 from stock_alpha.config import StockAlphaConfig, load_config_from_env
 from stock_alpha.engine import StockAlphaEngine
 from schemas.signal import CorrelatedSignal
@@ -38,22 +42,36 @@ def _signal_handler(sig, frame):
 
 
 def wait_for_kafka(bootstrap_servers: str, timeout: int = 60):
-    """Block until Kafka broker is reachable."""
-    from confluent_kafka.admin import AdminClient
+    """Block until message bus is reachable."""
+    wait_for_bus(bootstrap_servers, timeout)
 
-    log.info("Waiting for Kafka at %s...", bootstrap_servers)
-    admin = AdminClient({"bootstrap.servers": bootstrap_servers})
-    start = time.time()
-    while time.time() - start < timeout:
+
+def _run_doc_cache_consumer(engine, bootstrap):
+    """Background thread: consume normalized docs and cache them for sentiment lookup."""
+    doc_consumer = get_consumer({
+        "bootstrap.servers": bootstrap,
+        "group.id": "stock-alpha-doc-cache",
+        "auto.offset.reset": "latest",
+        "enable.auto.commit": True,
+    })
+    doc_consumer.subscribe(["osint.normalized"])
+    log.info("Document cache consumer started on osint.normalized")
+
+    while True:
+        msg = doc_consumer.poll(1.0)
+        if msg is None:
+            continue
+        if msg.error():
+            continue
         try:
-            metadata = admin.list_topics(timeout=5)
-            if metadata.topics:
-                log.info("Kafka is ready — %d topics found", len(metadata.topics))
-                return
-        except Exception:
-            pass
-        time.sleep(2)
-    raise RuntimeError(f"Kafka not reachable at {bootstrap_servers} after {timeout}s")
+            data = json.loads(msg.value().decode("utf-8"))
+            doc_id = data.get("doc_id", "")
+            title = data.get("title", "")
+            content = data.get("content_text", "")
+            if doc_id:
+                engine.cache_document(doc_id, title, content)
+        except Exception as e:
+            log.debug("Doc cache parse error: %s", e)
 
 
 def main():
@@ -69,8 +87,16 @@ def main():
     engine = StockAlphaEngine()
     engine.setup()
 
+    # Start document cache consumer in background thread
+    cache_thread = threading.Thread(
+        target=_run_doc_cache_consumer,
+        args=(engine, StockAlphaConfig.KAFKA_BOOTSTRAP),
+        daemon=True,
+    )
+    cache_thread.start()
+
     # Kafka consumer
-    consumer = Consumer({
+    consumer = get_consumer({
         "bootstrap.servers": StockAlphaConfig.KAFKA_BOOTSTRAP,
         "group.id": StockAlphaConfig.CONSUMER_GROUP,
         "auto.offset.reset": StockAlphaConfig.AUTO_OFFSET_RESET,
@@ -84,6 +110,9 @@ def main():
         StockAlphaConfig.KAFKA_BOOTSTRAP,
         client_id="stock-alpha-engine",
     )
+
+    # Wire up prediction publisher so engine can emit to stock.alpha.predictions
+    engine.set_prediction_publisher(publisher)
 
     log.info("=" * 60)
     log.info("Stock Alpha Engine running")
@@ -104,7 +133,7 @@ def main():
                 continue
 
             if msg.error():
-                if msg.error().code() != KafkaError._PARTITION_EOF:
+                if KafkaError and msg.error().code() != KafkaError._PARTITION_EOF:
                     log.error("Consumer error: %s", msg.error())
                 continue
 
