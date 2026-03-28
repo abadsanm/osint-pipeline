@@ -205,6 +205,18 @@ class InsiderScorer:
             _classify_title(t.insider_title) == "c_suite" for t in recent
         )
 
+        # Detect insider clustering: 3+ unique insiders buying within 7 days
+        cluster_window = timedelta(days=7)
+        recent_buyers: dict[str, datetime] = {}
+        for t in sorted(buys, key=lambda x: x.trade_date):
+            recent_buyers[t.insider_name] = t.trade_date
+            # Prune buyers outside window
+            cutoff_cluster = t.trade_date - cluster_window
+            recent_buyers = {k: v for k, v in recent_buyers.items() if v >= cutoff_cluster}
+            if len(recent_buyers) >= 3:
+                cluster_buy_detected = True
+                break
+
         # --- Weighted ratio with time decay -----------------------------------
         now = datetime.now(timezone.utc)
         weighted_buy = 0.0
@@ -228,6 +240,13 @@ class InsiderScorer:
             weighted_ratio = 0.0
 
         score = math.tanh(weighted_ratio * 2)
+
+        # Boost score when clustering detected (3+ insiders buying together)
+        if cluster_buy_detected and score > 0:
+            score = min(1.0, score * 1.5)
+        # C-suite buying is higher conviction
+        if c_suite_activity and score > 0:
+            score = min(1.0, score * 1.25)
 
         # --- Regime ----------------------------------------------------------
         if score > 0.5:

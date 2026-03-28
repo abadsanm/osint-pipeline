@@ -45,6 +45,8 @@ start "S-FRED" /min python -m connectors.fred
 start "S-Alpaca" /min python -m connectors.alpaca_market
 start "S-Earnings" /min python -m connectors.earnings_calendar
 start "S-ProductHunt" /min python -m connectors.producthunt
+start "S-OptionsFlow" /min python -m connectors.options_flow
+start "S-SEC13F" /min python -m connectors.sec_13f
 echo        19 connectors launched.
 
 echo [3/5] Starting normalization + correlation...

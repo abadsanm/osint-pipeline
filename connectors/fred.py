@@ -49,6 +49,8 @@ MACRO_SERIES = {
     "RSAFS":     ("Advance Retail Sales: Retail and Food Services", "Millions of Dollars"),
     "HOUST":     ("Housing Starts: Total New Privately Owned", "Thousands of Units"),
     "M2SL":      ("M2 Money Supply", "Billions of Dollars"),
+    "BAMLH0A0HYM2": ("ICE BofA US High Yield Index Option-Adjusted Spread", "Percent"),
+    "T10Y3M":    ("10-Year Treasury Minus 3-Month Treasury Yield Spread", "Percent"),
 }
 
 
