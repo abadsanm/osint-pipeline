@@ -4,7 +4,7 @@ Context for Claude Code when working in this repository.
 
 ## Project Overview
 
-Sentinel | Social Alpha — OSINT analytics platform. Ingests public data from **24 source connectors**, normalizes via NLP, cross-correlates across platforms, routes to two value engines: **Stock Alpha** (FinBERT + SVC + technicals + ML ensemble + microstructure) and **Product Ideation** (ABSA + gap analysis). Includes ML prediction engine (LightGBM + XGBoost + Prophet), backtesting framework, Sentinel AI chat, and Next.js dashboard.
+Sentinel | Open Source Alpha — OSINT analytics platform. Ingests public data from **24 source connectors**, normalizes via NLP, cross-correlates across platforms, routes to two value engines: **Stock Alpha** (FinBERT + SVC + technicals + ML ensemble + microstructure) and **Product Ideation** (ABSA + gap analysis). Includes ML prediction engine (LightGBM + XGBoost + Prophet), backtesting framework, Sentinel AI chat, and Next.js dashboard.
 
 **Current state:** End-to-end functional — all 24 connectors, normalization layer, cross-correlation engine, both value engines, ML prediction engine, backtesting framework, and Sentinel dashboard frontend with live data.
 

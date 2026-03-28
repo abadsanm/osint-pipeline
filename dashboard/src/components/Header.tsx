@@ -185,7 +185,7 @@ export default function Header({ title }: HeaderProps) {
           <span className="text-sm font-semibold tracking-wide">
             <span className="text-bullish">SENTINEL</span>
             <span className="hidden md:inline text-neutral mx-1.5">|</span>
-            <span className="hidden md:inline text-text-secondary">Social Alpha</span>
+            <span className="hidden md:inline text-text-secondary">Open Source Alpha</span>
           </span>
         </div>
         <div className="flex items-center gap-1">

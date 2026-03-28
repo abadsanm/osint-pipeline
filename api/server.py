@@ -1006,10 +1006,11 @@ def ml_train():
         log.info("Labeled %d snapshots with forward returns", labeled)
 
         stats = store.get_stats()
-        if stats.get("labeled", 0) < 50:
+        labeled_count = stats.get("labeled_snapshots", stats.get("labeled", 0))
+        if labeled_count < 50:
             return {
                 "status": "insufficient_data",
-                "message": f"Need at least 50 labeled samples, have {stats.get('labeled', 0)}. Keep the pipeline running to accumulate data.",
+                "message": f"Need at least 50 labeled samples, have {labeled_count}. Keep the pipeline running to accumulate data.",
                 "feature_store": stats,
             }
 

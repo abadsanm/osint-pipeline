@@ -16,7 +16,7 @@ const robotoMono = Roboto_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Sentinel | Social Alpha",
+  title: "Sentinel | Open Source Alpha",
   description: "Bloomberg Terminal for OSINT and Social Sentiment",
 };
 
