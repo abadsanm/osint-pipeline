@@ -256,7 +256,8 @@ function RSIGauge({ value }: { value: number | null }) {
   const startAngle = Math.PI;
   const endAngle = 0;
 
-  const clampedValue = value !== null ? Math.max(0, Math.min(100, value)) : 50;
+  const safeValue = (value != null && isFinite(value)) ? value : null;
+  const clampedValue = safeValue !== null ? Math.max(0, Math.min(100, safeValue)) : 50;
   const ratio = clampedValue / 100;
 
   // Arc path helper
@@ -274,11 +275,11 @@ function RSIGauge({ value }: { value: number | null }) {
 
   let color = "#8B949E"; // neutral
   let label = "Neutral";
-  if (value !== null) {
-    if (value < 30) {
+  if (safeValue !== null) {
+    if (safeValue < 30) {
       color = "#00FFC2";
       label = "Oversold";
-    } else if (value > 70) {
+    } else if (safeValue > 70) {
       color = "#FF4B2B";
       label = "Overbought";
     }
@@ -305,7 +306,7 @@ function RSIGauge({ value }: { value: number | null }) {
           strokeLinecap="round"
         />
         {/* Filled arc */}
-        {value !== null && (
+        {safeValue !== null && (
           <path
             d={describeArc(startAngle, filledEndAngle)}
             fill="none"
@@ -319,19 +320,19 @@ function RSIGauge({ value }: { value: number | null }) {
           x={cx}
           y={cy - 8}
           textAnchor="middle"
-          fill={value !== null ? color : "#7D8590"}
+          fill={safeValue !== null ? color : "#7D8590"}
           fontSize="22"
           fontFamily="Roboto Mono, monospace"
           fontWeight="600"
         >
-          {value != null ? value.toFixed(1) : "--"}
+          {safeValue !== null ? safeValue.toFixed(1) : "--"}
         </text>
       </svg>
       {/* Zone labels */}
       <div className="flex justify-between w-full text-[10px] text-text-muted -mt-1 px-1">
         <span>0</span>
         <span style={{ color }} className="font-semibold text-xs">
-          {value !== null ? label : "Awaiting data"}
+          {safeValue !== null ? label : "Awaiting data"}
         </span>
         <span>100</span>
       </div>
