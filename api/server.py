@@ -2971,6 +2971,195 @@ async def get_alpha(ticker: str):
     except Exception as e:
         log.debug("ML prediction failed for %s: %s", ticker, e)
 
+    # --- 7 NEW enrichment fields ---
+
+    # 7a. Prediction track record from predictions.db
+    prediction_track_record = None
+    try:
+        import sqlite3
+        pred_db_path = Path(__file__).resolve().parent.parent / "stock_alpha" / "data" / "predictions.db"
+        if pred_db_path.exists():
+            pconn = sqlite3.connect(str(pred_db_path))
+            total = pconn.execute("SELECT COUNT(*) FROM predictions WHERE ticker=?", (ticker,)).fetchone()[0]
+            correct = pconn.execute("SELECT COUNT(*) FROM predictions WHERE ticker=? AND outcome='correct'", (ticker,)).fetchone()[0]
+            incorrect = pconn.execute("SELECT COUNT(*) FROM predictions WHERE ticker=? AND outcome='incorrect'", (ticker,)).fetchone()[0]
+            pending = total - correct - incorrect
+            accuracy = correct / (correct + incorrect) if (correct + incorrect) > 0 else None
+            recent = pconn.execute(
+                "SELECT direction, confidence, outcome, created_at FROM predictions WHERE ticker=? ORDER BY created_at DESC LIMIT 5",
+                (ticker,),
+            ).fetchall()
+            pconn.close()
+            prediction_track_record = {
+                "total": total,
+                "correct": correct,
+                "incorrect": incorrect,
+                "pending": pending,
+                "accuracy": round(accuracy, 3) if accuracy else None,
+                "recent": [{"direction": r[0], "confidence": r[1], "outcome": r[2], "date": r[3]} for r in recent],
+            }
+    except Exception:
+        pass
+
+    # 7b. Insider activity from signals deque
+    insider_activity = None
+    try:
+        _insider_hits = []
+        with _lock:
+            for sig in list(signals)[-200:]:
+                if isinstance(sig, dict) and (sig.get("ticker") or "").upper() == ticker:
+                    top_sources = sig.get("top_sources", [])
+                    sources_dict_sig = sig.get("sources", {})
+                    source_names = top_sources if top_sources else (list(sources_dict_sig.keys()) if isinstance(sources_dict_sig, dict) else [])
+                    if any(s in ("sec_edgar", "openinsider", "sec_insider") for s in source_names):
+                        _insider_hits.append({
+                            "headline": sig.get("headline", "Insider activity detected"),
+                            "confidence": sig.get("confidence", 0),
+                            "timestamp": sig.get("timestamp", ""),
+                        })
+        if _insider_hits:
+            insider_activity = _insider_hits[:10]
+    except Exception:
+        pass
+
+    # 7c. Options sentiment from finance.options.flow Kafka topic
+    options_sentiment = None
+    try:
+        with _lock:
+            flow_docs = list(recent_docs.get("finance.options.flow", []))
+        # Find docs matching this ticker
+        for doc in reversed(flow_docs):
+            if not isinstance(doc, dict):
+                continue
+            doc_entities = [e.get("text", "").upper() for e in doc.get("entity_mentions", [])] if doc.get("entity_mentions") else []
+            doc_ticker = (doc.get("entity_id") or doc.get("source_id") or "").upper()
+            doc_title = (doc.get("title") or "").upper()
+            if ticker in doc_entities or ticker == doc_ticker or ticker in doc_title:
+                meta = doc.get("metadata", {}).get("options_data", {})
+                if meta:
+                    options_sentiment = {
+                        "put_call_ratio": meta.get("put_call_ratio"),
+                        "total_call_volume": meta.get("total_call_volume", 0),
+                        "total_put_volume": meta.get("total_put_volume", 0),
+                        "avg_call_iv": meta.get("avg_call_iv"),
+                        "avg_put_iv": meta.get("avg_put_iv"),
+                        "expiration": meta.get("expiration"),
+                        "most_active_call": meta.get("most_active_call"),
+                        "most_active_put": meta.get("most_active_put"),
+                    }
+                    break
+    except Exception:
+        pass
+
+    # 7d. Earnings countdown via yfinance calendar
+    earnings_countdown = None
+    try:
+        import yfinance as yf
+        cal = yf.Ticker(ticker).calendar
+        if cal is not None:
+            # yfinance returns calendar as a dict with 'Earnings Date' etc.
+            if isinstance(cal, dict):
+                earnings_date = cal.get("Earnings Date")
+                if isinstance(earnings_date, list) and len(earnings_date) > 0:
+                    next_date = earnings_date[0]
+                elif earnings_date is not None:
+                    next_date = earnings_date
+                else:
+                    next_date = None
+                if next_date is not None:
+                    from datetime import date as _date_type
+                    if hasattr(next_date, "date"):
+                        ed = next_date.date() if callable(next_date.date) else next_date
+                    elif isinstance(next_date, str):
+                        ed = datetime.fromisoformat(next_date).date()
+                    else:
+                        ed = next_date
+                    today = _date_type.today()
+                    days_until = (ed - today).days if hasattr(ed, '__sub__') else None
+                    earnings_countdown = {
+                        "date": str(ed),
+                        "days_until": days_until,
+                        "revenue_estimate": cal.get("Revenue Estimate"),
+                        "earnings_estimate": cal.get("Earnings Estimate"),
+                    }
+    except Exception:
+        pass
+
+    # 7e. Sector relative strength (5-day ticker vs sector ETF return)
+    _TICKER_TO_SECTOR_ETF = {
+        "AAPL": "XLK", "MSFT": "XLK", "NVDA": "XLK", "GOOGL": "XLK", "META": "XLK", "AMD": "XLK",
+        "INTC": "XLK", "CRM": "XLK", "ORCL": "XLK", "ADBE": "XLK",
+        "TSLA": "XLY", "AMZN": "XLY", "HD": "XLY", "NKE": "XLY",
+        "JPM": "XLF", "GS": "XLF", "BAC": "XLF", "MS": "XLF", "C": "XLF",
+        "XOM": "XLE", "CVX": "XLE", "COP": "XLE",
+        "JNJ": "XLV", "PFE": "XLV", "UNH": "XLV", "ABBV": "XLV",
+        "PG": "XLP", "KO": "XLP", "PEP": "XLP", "WMT": "XLP",
+        "NEE": "XLU", "DUK": "XLU",
+        "AMT": "XLRE", "PLD": "XLRE",
+        "CAT": "XLI", "BA": "XLI", "UPS": "XLI", "HON": "XLI",
+        "LIN": "XLB", "APD": "XLB",
+    }
+    sector_relative = None
+    try:
+        sector_etf = _TICKER_TO_SECTOR_ETF.get(ticker, "SPY")
+        import yfinance as yf
+        t_data = yf.Ticker(ticker).history(period="5d")
+        s_data = yf.Ticker(sector_etf).history(period="5d")
+        if not t_data.empty and not s_data.empty and len(t_data) >= 2 and len(s_data) >= 2:
+            t_ret = (t_data["Close"].iloc[-1] / t_data["Close"].iloc[0] - 1) * 100
+            s_ret = (s_data["Close"].iloc[-1] / s_data["Close"].iloc[0] - 1) * 100
+            sector_relative = {
+                "sector_etf": sector_etf,
+                "ticker_return_5d": round(float(t_ret), 2),
+                "sector_return_5d": round(float(s_ret), 2),
+                "relative_strength": round(float(t_ret - s_ret), 2),
+            }
+    except Exception:
+        pass
+
+    # 7f. Evidence chain from sample docs
+    evidence_chain = []
+    try:
+        sample_docs = sentiment_data.get("sample_docs", [])
+        for doc in sample_docs[:10]:
+            evidence_chain.append({
+                "source": doc.get("source", "unknown"),
+                "title": doc.get("title", ""),
+                "timestamp": doc.get("created_at", ""),
+                "url": doc.get("url"),
+            })
+    except Exception:
+        pass
+
+    # 7g. Data quality / trust metrics
+    sample_docs_all = sentiment_data.get("sample_docs", [])
+    unique_sources = list(set(d.get("source", "") for d in sample_docs_all))
+    data_quality = {
+        "total_documents": len(sample_docs_all),
+        "unique_sources": len(unique_sources),
+        "source_list": unique_sources,
+        "time_span_hours": 0,
+        "model_accuracy": prediction_track_record.get("accuracy") if prediction_track_record else None,
+        "disclaimer": (
+            f"Analysis based on {len(sample_docs_all)} documents from "
+            f"{len(unique_sources)} sources. This is not financial advice."
+        ),
+    }
+    try:
+        timestamps = []
+        for d in sample_docs_all:
+            ca = d.get("created_at", "")
+            if ca:
+                try:
+                    timestamps.append(datetime.fromisoformat(ca.replace("Z", "+00:00")))
+                except (ValueError, TypeError):
+                    pass
+        if len(timestamps) >= 2:
+            span = max(timestamps) - min(timestamps)
+            data_quality["time_span_hours"] = round(span.total_seconds() / 3600, 1)
+    except Exception:
+        pass
+
     return {
         "ticker": ticker,
         "company": company,
@@ -2989,6 +3178,14 @@ async def get_alpha(ticker: str):
         "macro": macro_data,
         "ml_prediction": ml_prediction,
         "feature_importance": feature_importance,
+        # --- 7 new enrichment fields ---
+        "prediction_track_record": prediction_track_record,
+        "insider_activity": insider_activity,
+        "options_sentiment": options_sentiment,
+        "earnings_countdown": earnings_countdown,
+        "sector_relative": sector_relative,
+        "evidence_chain": evidence_chain,
+        "data_quality": data_quality,
     }
 
 

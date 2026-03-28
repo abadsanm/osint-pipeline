@@ -7,7 +7,7 @@ import Header from "@/components/Header";
 import SourceTicker from "@/components/SourceTicker";
 import AnalysisModal from "@/components/AnalysisModal";
 import InfoTooltip from "@/components/InfoTooltip";
-import { Brain, ArrowLeft, ExternalLink, AlertTriangle, Loader2, Cpu, RefreshCw, CheckCircle, XCircle, Info } from "lucide-react";
+import { Brain, ArrowLeft, ExternalLink, AlertTriangle, Loader2, Cpu, RefreshCw, CheckCircle, XCircle, Info, Check, X, Clock, TrendingUp, TrendingDown, Shield, Minus } from "lucide-react";
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -113,6 +113,58 @@ interface AlphaData {
     feature: string;
     importance: number;
   }>;
+  prediction_track_record?: {
+    total: number;
+    correct: number;
+    incorrect: number;
+    pending: number;
+    accuracy: number;
+    recent: Array<{
+      direction: string;
+      confidence: number;
+      outcome: string;
+      date: string;
+    }>;
+  } | null;
+  insider_activity?: Array<{
+    headline: string;
+    confidence: number;
+    timestamp: string;
+  }> | null;
+  options_sentiment?: {
+    put_call_ratio: number;
+    total_call_volume: number;
+    total_put_volume: number;
+    avg_call_iv: number;
+    avg_put_iv: number;
+    expiration: string;
+    most_active_call: string;
+    most_active_put: string;
+  } | null;
+  earnings_countdown?: {
+    title: string;
+    content: string;
+    date: string;
+  } | null;
+  sector_relative?: {
+    sector_etf: string;
+    ticker_return_5d: number;
+    sector_return_5d: number;
+    relative_strength: number;
+  } | null;
+  evidence_chain?: Array<{
+    source: string;
+    title: string;
+    timestamp: string;
+    url: string;
+  }>;
+  data_quality?: {
+    total_documents: number;
+    unique_sources: number;
+    time_span_hours: number;
+    model_accuracy: number | null;
+    disclaimer: string;
+  } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -2045,6 +2097,505 @@ export default function FinancialAlphaPage() {
                 <p className="text-sm">Awaiting correlated signal</p>
               </div>
             )}
+          </div>
+        </div>
+
+        {/* ================================================================
+            6. Prediction Track Record + Insider Activity
+            ================================================================ */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-module-gap-lg mb-module-gap-lg">
+          {/* Prediction Track Record */}
+          <div className="bg-surface border border-border rounded-card p-card-padding-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Prediction Track Record</h3>
+              <InfoTooltip title="Prediction Track Record">
+                <p>Historical accuracy of the system&apos;s predictions for this ticker.</p>
+                <p>Shows total predictions made, how many were correct, incorrect, or still pending resolution.</p>
+                <p>Accuracy is calculated only from resolved predictions (correct / (correct + incorrect)).</p>
+              </InfoTooltip>
+            </div>
+            {data.prediction_track_record && data.prediction_track_record.total > 0 ? (
+              <div className="space-y-4">
+                {/* Accuracy headline */}
+                <div className="flex items-center gap-4">
+                  <span className={`font-mono text-[28px] font-semibold ${
+                    data.prediction_track_record.accuracy >= 0.6 ? "text-bullish" :
+                    data.prediction_track_record.accuracy < 0.5 ? "text-bearish" : "text-text-secondary"
+                  }`}>
+                    {(data.prediction_track_record.accuracy * 100)?.toFixed(1)}%
+                  </span>
+                  <span className="text-[11px] text-text-muted">
+                    accuracy ({data.prediction_track_record.correct + data.prediction_track_record.incorrect} resolved)
+                  </span>
+                </div>
+
+                {/* Segmented bar */}
+                {(() => {
+                  const tr = data.prediction_track_record;
+                  const total = tr?.total || 1;
+                  const correctPct = ((tr?.correct || 0) / total) * 100;
+                  const incorrectPct = ((tr?.incorrect || 0) / total) * 100;
+                  const pendingPct = ((tr?.pending || 0) / total) * 100;
+                  return (
+                    <div>
+                      <div className="flex h-2.5 rounded-full overflow-hidden bg-surface-alt">
+                        {correctPct > 0 && (
+                          <div className="bg-bullish" style={{ width: `${correctPct}%` }} />
+                        )}
+                        {incorrectPct > 0 && (
+                          <div className="bg-bearish" style={{ width: `${incorrectPct}%` }} />
+                        )}
+                        {pendingPct > 0 && (
+                          <div className="bg-neutral/40" style={{ width: `${pendingPct}%` }} />
+                        )}
+                      </div>
+                      <div className="flex items-center gap-4 mt-2">
+                        <span className="flex items-center gap-1 text-[11px] text-text-muted">
+                          <span className="w-2 h-2 rounded-full bg-bullish inline-block" />
+                          {tr?.correct} correct
+                        </span>
+                        <span className="flex items-center gap-1 text-[11px] text-text-muted">
+                          <span className="w-2 h-2 rounded-full bg-bearish inline-block" />
+                          {tr?.incorrect} incorrect
+                        </span>
+                        <span className="flex items-center gap-1 text-[11px] text-text-muted">
+                          <span className="w-2 h-2 rounded-full bg-neutral/40 inline-block" />
+                          {tr?.pending} pending
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Recent predictions */}
+                {data.prediction_track_record.recent && data.prediction_track_record.recent.length > 0 && (
+                  <div>
+                    <p className="text-[11px] text-text-muted uppercase tracking-wider mb-2">Recent Predictions</p>
+                    <div className="space-y-1.5">
+                      {data.prediction_track_record.recent.slice(0, 5).map((pred, i) => (
+                        <div key={i} className="flex items-center justify-between py-1.5 px-2 rounded bg-surface-alt/50">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[10px] font-semibold font-mono px-2 py-0.5 rounded ${
+                              pred.direction === "bullish"
+                                ? "bg-bullish/15 text-bullish"
+                                : pred.direction === "bearish"
+                                  ? "bg-bearish/15 text-bearish"
+                                  : "bg-neutral/15 text-neutral"
+                            }`}>
+                              {pred.direction?.toUpperCase()}
+                            </span>
+                            <span className="font-mono text-[11px] text-text-secondary">
+                              {(pred.confidence * 100)?.toFixed(0)}%
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-text-muted font-mono">
+                              {new Date(pred.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            </span>
+                            {pred.outcome === "correct" ? (
+                              <Check size={14} className="text-bullish" />
+                            ) : pred.outcome === "incorrect" ? (
+                              <X size={14} className="text-bearish" />
+                            ) : (
+                              <Minus size={14} className="text-text-muted" />
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-10 text-text-muted">
+                <Clock size={20} className="mb-2 opacity-40" />
+                <p className="text-sm">No predictions for this ticker yet</p>
+              </div>
+            )}
+          </div>
+
+          {/* Insider Activity */}
+          <div className="bg-surface border border-border rounded-card p-card-padding-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Insider Activity</h3>
+              <InfoTooltip title="Insider Activity">
+                <p>Recent insider trades filed with the SEC (Forms 3, 4, 5) and congressional trading disclosures.</p>
+                <p>Insider buying is often considered a bullish signal since insiders have the most knowledge about their company&apos;s prospects.</p>
+                <p>Confidence indicates how strongly the trade correlates with the overall signal direction.</p>
+              </InfoTooltip>
+            </div>
+            {data.insider_activity && data.insider_activity.length > 0 ? (
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {data.insider_activity.map((trade, i) => {
+                  const isBuy = /\b(buy|purchase|acquire)\b/i.test(trade.headline);
+                  const isSell = /\b(sell|sale|dispos)\b/i.test(trade.headline);
+                  return (
+                    <div key={i} className="p-3 rounded-md bg-surface-alt border border-border/50">
+                      <p className="text-sm text-text-primary leading-snug line-clamp-2 mb-1.5">
+                        {trade.headline}
+                      </p>
+                      <div className="flex items-center gap-3">
+                        <span className={`text-[10px] font-semibold font-mono px-2 py-0.5 rounded ${
+                          isBuy ? "bg-bullish/15 text-bullish" :
+                          isSell ? "bg-bearish/15 text-bearish" :
+                          "bg-neutral/15 text-neutral"
+                        }`}>
+                          {isBuy ? "BUY" : isSell ? "SELL" : "FILING"}
+                        </span>
+                        <span className="text-[11px] text-text-muted">
+                          Confidence: <span className="font-mono text-accent-blue">{(trade.confidence * 100)?.toFixed(0)}%</span>
+                        </span>
+                        <span className="text-[10px] text-text-muted font-mono ml-auto">
+                          {new Date(trade.timestamp).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-10 text-text-muted">
+                <Info size={20} className="mb-2 opacity-40" />
+                <p className="text-sm">No recent insider activity detected</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ================================================================
+            7. Options Sentiment + Earnings Countdown
+            ================================================================ */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-module-gap-lg mb-module-gap-lg">
+          {/* Options Sentiment */}
+          <div className="bg-surface border border-border rounded-card p-card-padding-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Options Sentiment</h3>
+              <InfoTooltip title="Options Sentiment">
+                <p>Put/Call ratio measures the relative volume of put options (bearish bets) to call options (bullish bets).</p>
+                <p>A ratio above 1.0 indicates more bearish positioning. Below 1.0 indicates bullish positioning.</p>
+                <p>Implied Volatility (IV) reflects the market&apos;s expectation of future price movement.</p>
+              </InfoTooltip>
+            </div>
+            {data.options_sentiment ? (
+              <div className="space-y-4">
+                {/* Put/Call Ratio */}
+                <div className="flex items-center gap-4">
+                  <span className={`font-mono text-[28px] font-semibold ${
+                    data.options_sentiment.put_call_ratio > 1 ? "text-bearish" :
+                    data.options_sentiment.put_call_ratio < 0.7 ? "text-bullish" : "text-text-secondary"
+                  }`}>
+                    {data.options_sentiment.put_call_ratio?.toFixed(2)}
+                  </span>
+                  <div>
+                    <p className="text-[11px] text-text-muted">Put/Call Ratio</p>
+                    <p className={`text-[10px] font-semibold ${
+                      data.options_sentiment.put_call_ratio > 1 ? "text-bearish" :
+                      data.options_sentiment.put_call_ratio < 0.7 ? "text-bullish" : "text-text-muted"
+                    }`}>
+                      {data.options_sentiment.put_call_ratio > 1 ? "Bearish Positioning" :
+                       data.options_sentiment.put_call_ratio < 0.7 ? "Bullish Positioning" : "Neutral"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Call vs Put Volume Bar */}
+                <div>
+                  <p className="text-[11px] text-text-muted uppercase tracking-wider mb-2">Volume Breakdown</p>
+                  {(() => {
+                    const totalVol = (data.options_sentiment?.total_call_volume || 0) + (data.options_sentiment?.total_put_volume || 0);
+                    const callPct = totalVol > 0 ? ((data.options_sentiment?.total_call_volume || 0) / totalVol) * 100 : 50;
+                    return (
+                      <div>
+                        <div className="flex h-3 rounded-full overflow-hidden bg-surface-alt">
+                          <div className="bg-bullish/70" style={{ width: `${callPct}%` }} />
+                          <div className="bg-bearish/70" style={{ width: `${100 - callPct}%` }} />
+                        </div>
+                        <div className="flex justify-between mt-1.5">
+                          <span className="text-[10px] text-bullish font-mono">
+                            Calls: {(data.options_sentiment?.total_call_volume || 0).toLocaleString()}
+                          </span>
+                          <span className="text-[10px] text-bearish font-mono">
+                            Puts: {(data.options_sentiment?.total_put_volume || 0).toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* IV & Most Active */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-2.5 rounded bg-surface-alt">
+                    <p className="text-[10px] text-text-muted mb-1">Avg Call IV</p>
+                    <p className="font-mono text-sm text-text-primary">{(data.options_sentiment.avg_call_iv * 100)?.toFixed(1)}%</p>
+                  </div>
+                  <div className="p-2.5 rounded bg-surface-alt">
+                    <p className="text-[10px] text-text-muted mb-1">Avg Put IV</p>
+                    <p className="font-mono text-sm text-text-primary">{(data.options_sentiment.avg_put_iv * 100)?.toFixed(1)}%</p>
+                  </div>
+                  <div className="p-2.5 rounded bg-surface-alt">
+                    <p className="text-[10px] text-text-muted mb-1">Most Active Call</p>
+                    <p className="font-mono text-sm text-bullish">{data.options_sentiment.most_active_call}</p>
+                  </div>
+                  <div className="p-2.5 rounded bg-surface-alt">
+                    <p className="text-[10px] text-text-muted mb-1">Most Active Put</p>
+                    <p className="font-mono text-sm text-bearish">{data.options_sentiment.most_active_put}</p>
+                  </div>
+                </div>
+
+                {/* Expiration */}
+                <p className="text-[10px] text-text-muted">
+                  Next expiration: <span className="font-mono text-text-secondary">{data.options_sentiment.expiration}</span>
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-10 text-text-muted">
+                <Info size={20} className="mb-2 opacity-40" />
+                <p className="text-sm">Options data not available (market may be closed)</p>
+              </div>
+            )}
+          </div>
+
+          {/* Earnings Countdown */}
+          <div className="bg-surface border border-border rounded-card p-card-padding-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Earnings Countdown</h3>
+              <InfoTooltip title="Earnings Countdown">
+                <p>Upcoming earnings report date and available estimates.</p>
+                <p>Earnings events often cause significant price volatility. The countdown helps you prepare for potential position adjustments.</p>
+              </InfoTooltip>
+            </div>
+            {data.earnings_countdown ? (
+              <div className="space-y-4">
+                {/* Days until */}
+                {(() => {
+                  const earningsDate = new Date(data.earnings_countdown?.date || "");
+                  const now = new Date();
+                  const diffMs = earningsDate.getTime() - now.getTime();
+                  const daysUntil = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+                  return (
+                    <div className="text-center py-3">
+                      <span className={`font-mono text-[36px] font-bold ${
+                        daysUntil <= 7 ? "text-bearish" :
+                        daysUntil <= 14 ? "text-accent-blue" : "text-text-primary"
+                      }`}>
+                        {daysUntil > 0 ? daysUntil : 0}
+                      </span>
+                      <p className="text-[11px] text-text-muted mt-1">
+                        {daysUntil > 0 ? "days until earnings" : "Earnings day!"}
+                      </p>
+                    </div>
+                  );
+                })()}
+
+                {/* Earnings title */}
+                <div className="p-3 rounded bg-surface-alt border border-border/50">
+                  <p className="text-sm text-text-primary font-medium leading-snug">
+                    {data.earnings_countdown.title}
+                  </p>
+                  <p className="text-[10px] text-text-muted font-mono mt-1">
+                    {new Date(data.earnings_countdown.date).toLocaleDateString("en-US", {
+                      weekday: "long",
+                      month: "long",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                  </p>
+                </div>
+
+                {/* Content / estimates */}
+                {data.earnings_countdown.content && (
+                  <p className="text-[11px] text-text-muted leading-relaxed">
+                    {data.earnings_countdown.content}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-10 text-text-muted">
+                <Clock size={20} className="mb-2 opacity-40" />
+                <p className="text-sm">No upcoming earnings data</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ================================================================
+            8. Sector Relative Strength + Evidence Chain
+            ================================================================ */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-module-gap-lg mb-module-gap-lg">
+          {/* Sector Relative Strength */}
+          <div className="bg-surface border border-border rounded-card p-card-padding-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Sector Relative Strength</h3>
+              <InfoTooltip title="Sector Relative Strength">
+                <p>Compares this ticker&apos;s 5-day return against its sector ETF.</p>
+                <p>Positive relative strength means the stock is outperforming its sector. Negative means underperforming.</p>
+                <p>Stocks that outperform their sector tend to continue outperforming in the short term (momentum effect).</p>
+              </InfoTooltip>
+            </div>
+            {data.sector_relative ? (
+              <div className="space-y-4">
+                {/* Relative strength number */}
+                <div className="flex items-center gap-3">
+                  {data.sector_relative.relative_strength >= 0 ? (
+                    <TrendingUp size={24} className="text-bullish" />
+                  ) : (
+                    <TrendingDown size={24} className="text-bearish" />
+                  )}
+                  <span className={`font-mono text-[28px] font-semibold ${
+                    data.sector_relative.relative_strength >= 0 ? "text-bullish" : "text-bearish"
+                  }`}>
+                    {data.sector_relative.relative_strength >= 0 ? "+" : ""}{data.sector_relative.relative_strength?.toFixed(2)}%
+                  </span>
+                  <span className="text-[11px] text-text-muted">
+                    vs {data.sector_relative.sector_etf}
+                  </span>
+                </div>
+
+                {/* Comparison bars */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    <span className="text-[11px] text-text-muted w-16 font-mono">{ticker}</span>
+                    <div className="flex-1 h-2 rounded-full bg-surface-alt overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${data.sector_relative.ticker_return_5d >= 0 ? "bg-bullish" : "bg-bearish"}`}
+                        style={{ width: `${Math.min(100, Math.abs(data.sector_relative.ticker_return_5d) * 10)}%` }}
+                      />
+                    </div>
+                    <span className={`font-mono text-[11px] w-16 text-right ${
+                      data.sector_relative.ticker_return_5d >= 0 ? "text-bullish" : "text-bearish"
+                    }`}>
+                      {data.sector_relative.ticker_return_5d >= 0 ? "+" : ""}{data.sector_relative.ticker_return_5d?.toFixed(2)}%
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[11px] text-text-muted w-16 font-mono">{data.sector_relative.sector_etf}</span>
+                    <div className="flex-1 h-2 rounded-full bg-surface-alt overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${data.sector_relative.sector_return_5d >= 0 ? "bg-accent-blue" : "bg-bearish/60"}`}
+                        style={{ width: `${Math.min(100, Math.abs(data.sector_relative.sector_return_5d) * 10)}%` }}
+                      />
+                    </div>
+                    <span className={`font-mono text-[11px] w-16 text-right ${
+                      data.sector_relative.sector_return_5d >= 0 ? "text-accent-blue" : "text-bearish"
+                    }`}>
+                      {data.sector_relative.sector_return_5d >= 0 ? "+" : ""}{data.sector_relative.sector_return_5d?.toFixed(2)}%
+                    </span>
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-text-muted">5-day return comparison</p>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-10 text-text-muted">
+                <Info size={20} className="mb-2 opacity-40" />
+                <p className="text-sm">Sector comparison unavailable</p>
+              </div>
+            )}
+          </div>
+
+          {/* Evidence Chain */}
+          <div className="bg-surface border border-border rounded-card p-card-padding-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider">Evidence Chain</h3>
+              <InfoTooltip title="Evidence Chain">
+                <p>A timeline showing the data sources and events that led to the current signal.</p>
+                <p>This is how the system reached its conclusion &mdash; each entry represents a piece of evidence from an independent source.</p>
+                <p>More diverse sources = higher confidence in the signal.</p>
+              </InfoTooltip>
+            </div>
+            {data.evidence_chain && data.evidence_chain.length > 0 ? (
+              <div className="relative max-h-80 overflow-y-auto pr-1">
+                {/* Vertical timeline line */}
+                <div className="absolute left-[7px] top-2 bottom-2 w-px bg-border" />
+                <div className="space-y-3">
+                  {data.evidence_chain.map((entry, i) => (
+                    <div key={i} className="flex items-start gap-3 relative">
+                      {/* Timeline dot */}
+                      <div className={`w-[15px] h-[15px] rounded-full border-2 border-base flex-shrink-0 mt-0.5 z-10 ${
+                        SOURCE_COLORS[entry.source] || "bg-text-muted"
+                      }`} />
+                      {/* Content */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                            SOURCE_COLORS[entry.source]
+                              ? `${SOURCE_COLORS[entry.source]}/20 text-text-primary`
+                              : "bg-surface-alt text-text-muted"
+                          }`}>
+                            {entry.source}
+                          </span>
+                          <span className="text-[10px] text-text-muted font-mono">
+                            {new Date(entry.timestamp).toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </span>
+                        </div>
+                        {entry.url ? (
+                          <a
+                            href={entry.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm text-text-primary hover:text-accent-blue transition-colors leading-snug line-clamp-2"
+                          >
+                            {entry.title}
+                            <ExternalLink size={10} className="inline ml-1 opacity-50" />
+                          </a>
+                        ) : (
+                          <p className="text-sm text-text-primary leading-snug line-clamp-2">{entry.title}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-10 text-text-muted">
+                <Info size={20} className="mb-2 opacity-40" />
+                <p className="text-sm">No evidence chain available</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ================================================================
+            9. Risk Disclaimer & Data Quality
+            ================================================================ */}
+        <div className="mb-module-gap-lg">
+          <div className="bg-surface-alt/50 border border-border/50 rounded-card p-card-padding">
+            <div className="flex items-start gap-3">
+              <Shield size={16} className="text-text-muted flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <div className="flex items-center gap-4 flex-wrap mb-2">
+                  {data.data_quality?.total_documents != null && (
+                    <span className="text-[11px] text-text-muted">
+                      Documents: <span className="font-mono text-text-secondary">{data.data_quality.total_documents.toLocaleString()}</span>
+                    </span>
+                  )}
+                  {data.data_quality?.unique_sources != null && (
+                    <span className="text-[11px] text-text-muted">
+                      Sources: <span className="font-mono text-text-secondary">{data.data_quality.unique_sources}</span>
+                    </span>
+                  )}
+                  {data.data_quality?.time_span_hours != null && (
+                    <span className="text-[11px] text-text-muted">
+                      Time span: <span className="font-mono text-text-secondary">{data.data_quality.time_span_hours?.toFixed(0)}h</span>
+                    </span>
+                  )}
+                  {data.data_quality?.model_accuracy != null && (
+                    <span className="text-[11px] text-text-muted">
+                      Model accuracy: <span className="font-mono text-text-secondary">{(data.data_quality.model_accuracy * 100)?.toFixed(1)}%</span>
+                    </span>
+                  )}
+                </div>
+                <p className="text-[10px] text-text-muted leading-relaxed">
+                  {data.data_quality?.disclaimer || "This is not financial advice. Sentinel provides AI-generated analysis based on publicly available data. All predictions are probabilistic and should be independently verified before making investment decisions."}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
