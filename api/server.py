@@ -992,6 +992,127 @@ def ml_status():
         return {"model_trained": False, "error": str(e), "feature_store": {}}
 
 
+@app.get("/api/stocks-to-watch")
+def stocks_to_watch():
+    """Stocks with strongest bullish/bearish signals backed by prediction accuracy.
+
+    Returns two lists: top bullish picks and top bearish picks, ranked by
+    signal conviction * historical accuracy for that ticker.
+    """
+    try:
+        import sqlite3 as _sqlite3
+
+        pred_db = Path(__file__).resolve().parent.parent / "stock_alpha" / "data" / "predictions.db"
+        if not pred_db.exists():
+            return {"bullish": [], "bearish": [], "message": "No predictions yet"}
+
+        conn = _sqlite3.connect(str(pred_db))
+
+        # Get per-ticker stats: direction consensus, accuracy, confidence
+        rows = conn.execute("""
+            SELECT ticker, direction,
+                   COUNT(*) as total,
+                   SUM(CASE WHEN outcome='correct' THEN 1 ELSE 0 END) as correct,
+                   SUM(CASE WHEN outcome='incorrect' THEN 1 ELSE 0 END) as incorrect,
+                   AVG(confidence) as avg_confidence,
+                   MAX(created_at) as latest
+            FROM predictions
+            GROUP BY ticker, direction
+            HAVING total >= 2
+            ORDER BY total DESC
+        """).fetchall()
+
+        # Also get latest price data for each ticker
+        ticker_data = {}
+        for ticker, direction, total, correct, incorrect, avg_conf, latest in rows:
+            evaluated = correct + incorrect
+            accuracy = correct / evaluated if evaluated > 0 else None
+
+            if ticker not in ticker_data:
+                ticker_data[ticker] = {
+                    "ticker": ticker,
+                    "bullish_count": 0, "bearish_count": 0, "neutral_count": 0,
+                    "total_predictions": 0, "evaluated": 0,
+                    "correct": 0, "accuracy": None,
+                    "avg_confidence": 0, "latest_date": "",
+                    "dominant_direction": "neutral",
+                    "conviction_score": 0,
+                }
+
+            td = ticker_data[ticker]
+            td[f"{direction}_count"] += total
+            td["total_predictions"] += total
+            td["evaluated"] += evaluated
+            td["correct"] += correct
+            td["avg_confidence"] = max(td["avg_confidence"], avg_conf or 0)
+            if latest and latest > td["latest_date"]:
+                td["latest_date"] = latest
+
+        conn.close()
+
+        # Compute conviction score for each ticker
+        for td in ticker_data.values():
+            bull = td["bullish_count"]
+            bear = td["bearish_count"]
+            total = td["total_predictions"]
+
+            if bull > bear and bull > td["neutral_count"]:
+                td["dominant_direction"] = "bullish"
+                consensus_ratio = bull / total if total > 0 else 0
+            elif bear > bull and bear > td["neutral_count"]:
+                td["dominant_direction"] = "bearish"
+                consensus_ratio = bear / total if total > 0 else 0
+            else:
+                td["dominant_direction"] = "neutral"
+                consensus_ratio = 0
+
+            # Accuracy factor (rewards tickers where model has been correct)
+            if td["evaluated"] > 0:
+                accuracy = td["correct"] / td["evaluated"]
+                td["accuracy"] = round(accuracy, 3)
+                accuracy_factor = accuracy
+            else:
+                accuracy_factor = 0.5  # Neutral when no outcomes yet
+
+            # Conviction = consensus_ratio * confidence * accuracy_factor
+            td["conviction_score"] = round(
+                consensus_ratio * td["avg_confidence"] * accuracy_factor * 100, 1
+            )
+
+            # Get price data
+            try:
+                import yfinance as _yf
+                hist = _yf.Ticker(td["ticker"]).history(period="5d")
+                if not hist.empty:
+                    close_col = "Close" if "Close" in hist.columns else "close"
+                    if close_col in hist.columns:
+                        td["price"] = round(float(hist[close_col].iloc[-1]), 2)
+                        td["change_5d"] = round(
+                            (float(hist[close_col].iloc[-1]) / float(hist[close_col].iloc[0]) - 1) * 100, 2
+                        )
+            except Exception:
+                pass
+
+        all_tickers = list(ticker_data.values())
+
+        # Split into bullish and bearish, sorted by conviction
+        bullish = sorted(
+            [t for t in all_tickers if t["dominant_direction"] == "bullish"],
+            key=lambda x: x["conviction_score"], reverse=True,
+        )[:10]
+
+        bearish = sorted(
+            [t for t in all_tickers if t["dominant_direction"] == "bearish"],
+            key=lambda x: x["conviction_score"], reverse=True,
+        )[:10]
+
+        return {"bullish": bullish, "bearish": bearish}
+
+    except Exception as e:
+        log.error("Stocks to watch error: %s", e, exc_info=True)
+        return {"bullish": [], "bearish": [], "error": str(e)}
+
+
 @app.post("/api/ml/train")
 def ml_train():
     """Train the ML model on available feature store data."""
