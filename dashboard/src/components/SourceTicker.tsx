@@ -4,33 +4,43 @@ import { useStats } from "@/hooks/useApiData";
 
 /** Color per source — matches connector identity */
 const SOURCE_META: Record<string, { label: string; dot: string; text: string }> = {
+  // Social / Community
   hacker_news:      { label: "Hacker News",      dot: "#FF6600", text: "text-[#FF6600]" },
   github:           { label: "GitHub",            dot: "#8B5CF6", text: "text-[#8B5CF6]" },
   reddit:           { label: "Reddit",            dot: "#FF4500", text: "text-[#FF4500]" },
-  sec_edgar:        { label: "SEC EDGAR",         dot: "#00FFC2", text: "text-bullish" },
-  openinsider:      { label: "OpenInsider",       dot: "#00FFC2", text: "text-bullish" },
-  fred:             { label: "FRED",              dot: "#58A6FF", text: "text-accent-blue" },
-  news:             { label: "Financial News",    dot: "#FBBF24", text: "text-[#FBBF24]" },
-  producthunt:      { label: "ProductHunt",       dot: "#DA552F", text: "text-[#DA552F]" },
-  trustpilot:       { label: "Trustpilot",        dot: "#00B67A", text: "text-[#00B67A]" },
-  google_trends:    { label: "Google Trends",     dot: "#4285F4", text: "text-[#4285F4]" },
-  amazon:           { label: "Amazon",            dot: "#FF9900", text: "text-[#FF9900]" },
-  alpaca:           { label: "Alpaca",            dot: "#F5D547", text: "text-[#F5D547]" },
-  binance:          { label: "Binance",           dot: "#F3BA2F", text: "text-[#F3BA2F]" },
-  finviz:           { label: "Finviz",            dot: "#2196F3", text: "text-[#2196F3]" },
-  techcrunch:       { label: "TechCrunch",        dot: "#0A9E1A", text: "text-[#0A9E1A]" },
-  seeking_alpha:    { label: "Seeking Alpha",     dot: "#F57C00", text: "text-[#F57C00]" },
-  techmeme:         { label: "Techmeme",          dot: "#CC0000", text: "text-[#CC0000]" },
-  newsletter:       { label: "Newsletters",       dot: "#AB47BC", text: "text-[#AB47BC]" },
-  sam_gov:          { label: "SAM.gov",           dot: "#1565C0", text: "text-[#1565C0]" },
-  usaspending:      { label: "USAspending",       dot: "#1565C0", text: "text-[#1565C0]" },
-  federal_register: { label: "Fed Register",      dot: "#5C6BC0", text: "text-[#5C6BC0]" },
-  sbir:             { label: "SBIR",              dot: "#26A69A", text: "text-[#26A69A]" },
-  bls:              { label: "BLS",               dot: "#78909C", text: "text-[#78909C]" },
   stocktwits:       { label: "StockTwits",        dot: "#1DA1F2", text: "text-[#1DA1F2]" },
   bluesky:          { label: "Bluesky",           dot: "#0085FF", text: "text-[#0085FF]" },
+  producthunt:      { label: "ProductHunt",       dot: "#DA552F", text: "text-[#DA552F]" },
+  // Financial Data
+  sec_edgar:        { label: "SEC EDGAR",         dot: "#00FFC2", text: "text-bullish" },
+  sec_13f:          { label: "SEC 13F",           dot: "#00E5A0", text: "text-bullish" },
+  openinsider:      { label: "OpenInsider",       dot: "#00D4AA", text: "text-bullish" },
+  options_flow:     { label: "Options Flow",      dot: "#E040FB", text: "text-[#E040FB]" },
+  unusual_whales:   { label: "Unusual Whales",    dot: "#7C4DFF", text: "text-[#7C4DFF]" },
+  earnings:         { label: "Earnings",          dot: "#FFD600", text: "text-[#FFD600]" },
+  // Market Data
+  alpaca:           { label: "Alpaca",            dot: "#F5D547", text: "text-[#F5D547]" },
+  binance:          { label: "Binance",           dot: "#F3BA2F", text: "text-[#F3BA2F]" },
+  // Macro / Government
+  fred:             { label: "FRED",              dot: "#58A6FF", text: "text-accent-blue" },
+  bls:              { label: "BLS",               dot: "#78909C", text: "text-[#78909C]" },
+  sam_gov:          { label: "SAM.gov",           dot: "#1565C0", text: "text-[#1565C0]" },
+  usaspending:      { label: "USAspending",       dot: "#1976D2", text: "text-[#1976D2]" },
+  federal_register: { label: "Fed Register",      dot: "#5C6BC0", text: "text-[#5C6BC0]" },
+  sbir:             { label: "SBIR",              dot: "#26A69A", text: "text-[#26A69A]" },
+  google_trends:    { label: "Google Trends",     dot: "#4285F4", text: "text-[#4285F4]" },
+  // News / Newsletters
+  news:             { label: "Financial News",    dot: "#FBBF24", text: "text-[#FBBF24]" },
+  finviz:           { label: "Finviz",            dot: "#2196F3", text: "text-[#2196F3]" },
+  seeking_alpha:    { label: "Seeking Alpha",     dot: "#F57C00", text: "text-[#F57C00]" },
+  techcrunch:       { label: "TechCrunch",        dot: "#0A9E1A", text: "text-[#0A9E1A]" },
+  techmeme:         { label: "Techmeme",          dot: "#CC0000", text: "text-[#CC0000]" },
+  newsletter:       { label: "Newsletters",       dot: "#AB47BC", text: "text-[#AB47BC]" },
   yahoo_news:       { label: "Yahoo News",        dot: "#6001D2", text: "text-[#6001D2]" },
-  yahoo_rss:        { label: "Yahoo RSS",         dot: "#6001D2", text: "text-[#6001D2]" },
+  yahoo_rss:        { label: "Yahoo RSS",         dot: "#7B1FA2", text: "text-[#7B1FA2]" },
+  // Consumer Reviews
+  trustpilot:       { label: "Trustpilot",        dot: "#00B67A", text: "text-[#00B67A]" },
+  amazon:           { label: "Amazon",            dot: "#FF9900", text: "text-[#FF9900]" },
 };
 
 function formatCount(n: number): string {
