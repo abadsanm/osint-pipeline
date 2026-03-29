@@ -1079,16 +1079,16 @@ def stocks_to_watch():
                 consensus_ratio * td["avg_confidence"] * accuracy_factor * 100, 1
             )
 
-            # Get price data
+            # Get price data from cache
             try:
-                import yfinance as _yf
-                hist = _yf.Ticker(td["ticker"]).history(period="5d")
-                if not hist.empty:
-                    close_col = "Close" if "Close" in hist.columns else "close"
-                    if close_col in hist.columns:
-                        td["price"] = round(float(hist[close_col].iloc[-1]), 2)
+                info, hist = _get_yf_data(td["ticker"])
+                if hist is not None and not hist.empty:
+                    h5 = hist.tail(5)
+                    close_col = "Close" if "Close" in h5.columns else "close"
+                    if close_col in h5.columns and len(h5) >= 2:
+                        td["price"] = round(float(h5[close_col].iloc[-1]), 2)
                         td["change_5d"] = round(
-                            (float(hist[close_col].iloc[-1]) / float(hist[close_col].iloc[0]) - 1) * 100, 2
+                            (float(h5[close_col].iloc[-1]) / float(h5[close_col].iloc[0]) - 1) * 100, 2
                         )
             except Exception:
                 pass
@@ -2529,11 +2529,16 @@ def search_entities(
 
 # Cache for yfinance data: {ticker: (fetch_time, info_dict, price_df)}
 _yf_cache: dict[str, tuple[float, dict, object]] = {}
-_YF_CACHE_TTL = 300  # 5 minutes
+_YF_CACHE_TTL = 900  # 15 minutes — Yahoo rate-limits aggressively
+
+
+_yf_last_call = 0.0
+_YF_MIN_INTERVAL = 2.0  # Min 2 seconds between Yahoo calls to avoid rate limit
 
 
 def _get_yf_data(ticker: str) -> tuple[dict, object]:
-    """Fetch yfinance Ticker info and price history with 5-minute caching."""
+    """Fetch yfinance Ticker info and price history with 15-minute caching + rate limiting."""
+    global _yf_last_call
     import yfinance as yf
 
     cached = _yf_cache.get(ticker)
@@ -2542,11 +2547,24 @@ def _get_yf_data(ticker: str) -> tuple[dict, object]:
         if time.time() - fetch_time < _YF_CACHE_TTL:
             return info, hist
 
-    t = yf.Ticker(ticker)
-    info = t.info or {}
-    hist = t.history(period="3mo")
-    _yf_cache[ticker] = (time.time(), info, hist)
-    return info, hist
+    # Rate limit: wait if we called too recently
+    elapsed = time.time() - _yf_last_call
+    if elapsed < _YF_MIN_INTERVAL:
+        time.sleep(_YF_MIN_INTERVAL - elapsed)
+
+    try:
+        _yf_last_call = time.time()
+        t = yf.Ticker(ticker)
+        info = t.info or {}
+        hist = t.history(period="3mo")
+        _yf_cache[ticker] = (time.time(), info, hist)
+        return info, hist
+    except Exception as e:
+        log.warning("yfinance rate limited for %s: %s", ticker, e)
+        # Return stale cache if available
+        if cached:
+            return cached[1], cached[2]
+        return {}, None
 
 
 @app.get("/api/alpha/{ticker}")
@@ -3172,14 +3190,24 @@ async def get_alpha(ticker: str):
     except Exception:
         pass
 
-    # 7d. Earnings countdown via yfinance calendar
+    # 7d. Earnings countdown — use cached yfinance info
     earnings_countdown = None
     try:
-        import yfinance as yf
-        cal = yf.Ticker(ticker).calendar
-        if cal is not None:
-            # yfinance returns calendar as a dict with 'Earnings Date' etc.
-            if isinstance(cal, dict):
+        yf_info, _ = _get_yf_data(ticker)
+        if yf_info:
+            # Try to get earnings date from info dict
+            from datetime import date as _date_type
+            today = _date_type.today()
+            # yfinance info may have 'earningsTimestamp' or 'earningsDate'
+            import yfinance as _yf_e
+            try:
+                cal = _yf_e.Ticker(ticker).calendar if ticker not in _yf_cache else None
+            except Exception:
+                cal = None
+            # Use info fields as fallback
+            eps_est = yf_info.get("forwardEps") or yf_info.get("trailingEps")
+            revenue_est = yf_info.get("revenueEstimate") or yf_info.get("totalRevenue")
+            if cal and isinstance(cal, dict):
                 earnings_date = cal.get("Earnings Date")
                 if isinstance(earnings_date, list) and len(earnings_date) > 0:
                     next_date = earnings_date[0]
@@ -3188,20 +3216,18 @@ async def get_alpha(ticker: str):
                 else:
                     next_date = None
                 if next_date is not None:
-                    from datetime import date as _date_type
                     if hasattr(next_date, "date"):
                         ed = next_date.date() if callable(next_date.date) else next_date
                     elif isinstance(next_date, str):
                         ed = datetime.fromisoformat(next_date).date()
                     else:
                         ed = next_date
-                    today = _date_type.today()
                     days_until = (ed - today).days if hasattr(ed, '__sub__') else None
                     earnings_countdown = {
                         "date": str(ed),
                         "days_until": days_until,
-                        "revenue_estimate": cal.get("Revenue Estimate"),
-                        "earnings_estimate": cal.get("Earnings Estimate"),
+                        "revenue_estimate": revenue_est,
+                        "earnings_estimate": eps_est,
                     }
     except Exception:
         pass
@@ -3223,18 +3249,22 @@ async def get_alpha(ticker: str):
     sector_relative = None
     try:
         sector_etf = _TICKER_TO_SECTOR_ETF.get(ticker, "SPY")
-        import yfinance as yf
-        t_data = yf.Ticker(ticker).history(period="5d")
-        s_data = yf.Ticker(sector_etf).history(period="5d")
-        if not t_data.empty and not s_data.empty and len(t_data) >= 2 and len(s_data) >= 2:
-            t_ret = (t_data["Close"].iloc[-1] / t_data["Close"].iloc[0] - 1) * 100
-            s_ret = (s_data["Close"].iloc[-1] / s_data["Close"].iloc[0] - 1) * 100
-            sector_relative = {
-                "sector_etf": sector_etf,
-                "ticker_return_5d": round(float(t_ret), 2),
-                "sector_return_5d": round(float(s_ret), 2),
-                "relative_strength": round(float(t_ret - s_ret), 2),
-            }
+        _, t_hist = _get_yf_data(ticker)
+        _, s_hist = _get_yf_data(sector_etf)
+        if t_hist is not None and not t_hist.empty and s_hist is not None and not s_hist.empty:
+            # Use last 5 trading days from the 3-month cache
+            t_5d = t_hist.tail(5)
+            s_5d = s_hist.tail(5)
+            close_col = "Close" if "Close" in t_5d.columns else "close"
+            if len(t_5d) >= 2 and len(s_5d) >= 2 and close_col in t_5d.columns and close_col in s_5d.columns:
+                t_ret = (float(t_5d[close_col].iloc[-1]) / float(t_5d[close_col].iloc[0]) - 1) * 100
+                s_ret = (float(s_5d[close_col].iloc[-1]) / float(s_5d[close_col].iloc[0]) - 1) * 100
+                sector_relative = {
+                    "sector_etf": sector_etf,
+                    "ticker_return_5d": round(t_ret, 2),
+                    "sector_return_5d": round(s_ret, 2),
+                    "relative_strength": round(t_ret - s_ret, 2),
+                }
     except Exception:
         pass
 
