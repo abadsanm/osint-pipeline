@@ -1648,6 +1648,7 @@ export default function FinancialAlphaPage() {
     );
   }
 
+  const hasPrice = data.price != null && data.price > 0;
   const changePct = data.change_pct ?? 0;
   const changePositive = changePct >= 0;
   const sentimentScore = data.sentiment?.score ?? 0.5;
@@ -1701,7 +1702,7 @@ export default function FinancialAlphaPage() {
           <div className="flex flex-wrap items-center gap-3">
             {/* Price & change */}
             <div className="text-right">
-              <p className="font-mono text-2xl font-semibold">${data.price?.toFixed(2) ?? "--"}</p>
+              <p className="font-mono text-2xl font-semibold">{hasPrice ? `$${data.price?.toFixed(2)}` : "No price data"}</p>
               <p className={`font-mono text-sm ${changePositive ? "text-bullish" : "text-bearish"}`}>
                 {changePositive ? "+" : ""}
                 {data.change_amt?.toFixed(2) ?? "0.00"} ({changePositive ? "+" : ""}
@@ -1748,9 +1749,26 @@ export default function FinancialAlphaPage() {
           </div>
         </div>
 
+        {/* No price data banner */}
+        {!hasPrice && (
+          <div className="bg-surface-alt border border-border/50 rounded-card p-card-padding flex items-center gap-3 mb-module-gap-lg">
+            <AlertTriangle size={16} className="text-neutral flex-shrink-0" />
+            <div>
+              <p className="text-sm text-text-secondary">
+                No market price data available for <span className="font-mono font-semibold">{ticker}</span>.
+              </p>
+              <p className="text-xs text-text-muted mt-0.5">
+                This may not be a tradeable equity ticker, or price data sources (Yahoo Finance / Alpaca) are temporarily unavailable.
+                OSINT signals and prediction history are shown below where available.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* ================================================================
             2 + 3. Main Chart (left) + Technical Indicators (right)
             ================================================================ */}
+        {hasPrice && (<>
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-module-gap-lg mb-module-gap-lg">
           {/* Main Price Chart */}
           <div className="bg-surface border border-border rounded-card p-card-padding-lg min-h-[400px]">
@@ -1878,18 +1896,22 @@ export default function FinancialAlphaPage() {
           </div>
         </div>
 
+        </>)}
+
         {/* ================================================================
             4. Signal Scorecard
             ================================================================ */}
         {data.score && <div className="mb-module-gap-lg"><SignalScorecard score={data.score} ticker={ticker} /></div>}
 
         {/* ================================================================
-            4b. Volume Profile + Volume & OBV Analysis
+            4b. Volume Profile + Volume & OBV Analysis (only with price data)
             ================================================================ */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-module-gap-lg mb-module-gap-lg">
-          <VolumeProfile candles={data.candles} />
-          <VolumeAnalysis technicals_series={data.technicals_series} />
-        </div>
+        {hasPrice && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-module-gap-lg mb-module-gap-lg">
+            <VolumeProfile candles={data.candles} />
+            <VolumeAnalysis technicals_series={data.technicals_series} />
+          </div>
+        )}
 
         {/* ================================================================
             4c. ML Prediction Panel
