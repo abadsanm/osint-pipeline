@@ -1810,10 +1810,15 @@ def predict_ticker(ticker: str, horizon: int = Query(24, ge=1, le=168)):
         from schemas.prediction import Prediction
         import math
 
+        # Try PriceDataProvider (yfinance) first, fall back to Alpaca
         prices = PriceDataProvider()
         df = prices.get_prices(ticker)
         if df is None or df.empty:
-            return {"status": "no_data", "ticker": ticker, "message": "Could not fetch price data"}
+            # Alpaca fallback
+            _, alpaca_hist = _get_yf_data(ticker)
+            df = alpaca_hist
+        if df is None or df.empty:
+            return {"status": "no_data", "ticker": ticker, "message": "Could not fetch price data (Yahoo rate-limited, Alpaca unavailable)"}
 
         technicals = compute_technicals(df)
         scorer = RuleBasedScorer()
@@ -2534,18 +2539,64 @@ _YF_CACHE_TTL = 900  # 15 minutes — Yahoo rate-limits aggressively
 
 _yf_last_call = 0.0
 _YF_MIN_INTERVAL = 2.0  # Min 2 seconds between Yahoo calls to avoid rate limit
+_yf_blocked = False  # Set True when Yahoo rate-limits us
+_yf_blocked_until = 0.0
+
+
+def _get_price_alpaca(ticker: str):
+    """Fallback: fetch price data from Alpaca when yfinance is rate-limited."""
+    try:
+        import aiohttp, asyncio
+        from pathlib import Path as _P
+
+        # Load Alpaca keys from .env
+        env_path = _P(__file__).resolve().parent.parent / ".env"
+        alpaca_key = os.environ.get("ALPACA_API_KEY", "")
+        alpaca_secret = os.environ.get("ALPACA_API_SECRET", "")
+        if not alpaca_key:
+            return None
+
+        import requests
+        headers = {"APCA-API-KEY-ID": alpaca_key, "APCA-API-SECRET-KEY": alpaca_secret}
+        url = f"https://data.alpaca.markets/v2/stocks/{ticker}/bars"
+        params = {"timeframe": "1Day", "limit": "60", "feed": "iex"}
+        resp = requests.get(url, headers=headers, params=params, timeout=10)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        bars = data.get("bars", [])
+        if not bars:
+            return None
+
+        import pandas as pd
+        df = pd.DataFrame(bars)
+        df = df.rename(columns={"c": "Close", "o": "Open", "h": "High", "l": "Low", "v": "Volume", "t": "Date"})
+        df.index = pd.to_datetime(df["Date"])
+        return df
+    except Exception:
+        return None
 
 
 def _get_yf_data(ticker: str) -> tuple[dict, object]:
-    """Fetch yfinance Ticker info and price history with 15-minute caching + rate limiting."""
-    global _yf_last_call
-    import yfinance as yf
+    """Fetch price data with 15-minute caching. Uses yfinance with Alpaca fallback."""
+    global _yf_last_call, _yf_blocked, _yf_blocked_until
 
     cached = _yf_cache.get(ticker)
     if cached:
         fetch_time, info, hist = cached
         if time.time() - fetch_time < _YF_CACHE_TTL:
             return info, hist
+
+    # If Yahoo is rate-limited, try Alpaca directly
+    if _yf_blocked and time.time() < _yf_blocked_until:
+        alpaca_df = _get_price_alpaca(ticker)
+        if alpaca_df is not None and not alpaca_df.empty:
+            info = {"shortName": ticker, "source": "alpaca"}
+            _yf_cache[ticker] = (time.time(), info, alpaca_df)
+            return info, alpaca_df
+        if cached:
+            return cached[1], cached[2]
+        return {}, None
 
     # Rate limit: wait if we called too recently
     elapsed = time.time() - _yf_last_call
@@ -2554,14 +2605,26 @@ def _get_yf_data(ticker: str) -> tuple[dict, object]:
 
     try:
         _yf_last_call = time.time()
+        import yfinance as yf
         t = yf.Ticker(ticker)
         info = t.info or {}
         hist = t.history(period="3mo")
-        _yf_cache[ticker] = (time.time(), info, hist)
+        if hist is not None and not hist.empty:
+            _yf_cache[ticker] = (time.time(), info, hist)
+            _yf_blocked = False
         return info, hist
     except Exception as e:
-        log.warning("yfinance rate limited for %s: %s", ticker, e)
-        # Return stale cache if available
+        log.warning("yfinance failed for %s: %s — trying Alpaca fallback", ticker, e)
+        _yf_blocked = True
+        _yf_blocked_until = time.time() + 600  # Block yfinance for 10 min
+
+        # Try Alpaca
+        alpaca_df = _get_price_alpaca(ticker)
+        if alpaca_df is not None and not alpaca_df.empty:
+            info = {"shortName": ticker, "source": "alpaca"}
+            _yf_cache[ticker] = (time.time(), info, alpaca_df)
+            return info, alpaca_df
+
         if cached:
             return cached[1], cached[2]
         return {}, None
